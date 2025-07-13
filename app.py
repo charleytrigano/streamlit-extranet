@@ -18,8 +18,6 @@ if uploaded_file:
     st.subheader("📋 Données chargées :")
     st.dataframe(df)
 
-    # Vérification de colonnes attendues
-    required_columns = {"nom_client", "date_arrivee", "telephone"}
         if not required_columns.issubset(df.columns):
         st.error("Le fichier doit contenir les colonnes : nom_client, date_arrivee, telephone")
     else:
