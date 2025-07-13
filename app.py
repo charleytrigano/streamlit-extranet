@@ -20,13 +20,11 @@ if uploaded_file:
 
     # Vérification de colonnes attendues
     required_columns = {"nom_client", "date_arrivee", "telephone"}
-    if not required_columns.issubset(df.columns):
+        if not required_columns.issubset(df.columns):
         st.error("Le fichier doit contenir les colonnes : nom_client, date_arrivee, telephone")
     else:
-        # Convertir la colonne date_arrivee
+        # Convertir les dates
         df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-
-        # Filtrer pour les clients qui arrivent demain
         today = datetime.date.today()
         tomorrow = today + datetime.timedelta(days=1)
 
@@ -37,8 +35,10 @@ if uploaded_file:
         else:
             st.success(f"{len(df_tomorrow)} client(s) arrivent demain ({tomorrow}).")
 
-            if st.button("📤 Envoyer les SMS de rappel"):
-                # Récupérer les clés depuis les secrets
+            # 🔥 C'est ici le bouton :
+            send_sms = st.button("📤 Envoyer les SMS de rappel")
+
+            if send_sms:
                 sid = os.environ.get("TWILIO_SID")
                 token = os.environ.get("TWILIO_TOKEN")
                 sender = os.environ.get("TWILIO_NUMBER")
@@ -57,4 +57,4 @@ if uploaded_file:
                             )
                             st.success(f"✅ SMS envoyé à {row['nom_client']} ({row['telephone']})")
                         except Exception as e:
-                            st.error(f"❌ Échec pour {row['telephone']} : {e}")
+                            st.error(f"❌ Erreur pour {row['telephone']} : {e}")
