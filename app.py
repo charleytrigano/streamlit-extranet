@@ -1,64 +1,60 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
-from twilio.rest import Client
+import datetime
 import os
-from dotenv import load_dotenv
+from twilio.rest import Client
 
-# 🔐 Chargement des identifiants Twilio depuis le fichier .env
-load_dotenv()
+st.set_page_config(page_title="Extranet · Rappels SMS", layout="centered")
 
-TWILIO_SID = os.getenv("TWILIO_SID")
-TWILIO_TOKEN = os.getenv("TWILIO_TOKEN")
-TWILIO_NUMBER = os.getenv("TWILIO_NUMBER")
+st.title("📩 Envoi automatique de SMS aux clients")
 
-client = Client(TWILIO_SID, TWILIO_TOKEN)
+st.markdown("Importez un fichier `.csv` contenant les réservations à venir.")
 
-# ------------------------------
-# Interface Streamlit
-# ------------------------------
-st.set_page_config(page_title="📅 Réservations Automatisées", layout="centered")
-st.title("🏨 Récupération des données Airbnb & Booking")
+uploaded_file = st.file_uploader("Importer un fichier CSV", type="csv")
 
-st.markdown("Cette application vous permet d'importer vos réservations 📄 et de planifier un envoi de **SMS automatique** 📲.")
-
-# ------------------------------
-# Upload du fichier CSV
-# ------------------------------
-uploaded_file = st.file_uploader("📂 Importer vos réservations (CSV)", type=["csv"])
-
-if uploaded_file is not None:
+if uploaded_file:
     df = pd.read_csv(uploaded_file)
 
-    st.subheader("📋 Réservations chargées :")
+    st.subheader("📋 Données chargées :")
     st.dataframe(df)
 
-    # ------------------------------
-    # Filtrage : clients qui arrivent demain
-    # ------------------------------
-    demain = (datetime.now() + timedelta(days=1)).date()
-    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"]).dt.date
-    arrivants = df[df["date_arrivee"] == demain]
-
-    if not arrivants.empty:
-        st.success(f"{len(arrivants)} client(s) prévu(s) pour demain ({demain})")
-        st.dataframe(arrivants)
-
-        # ------------------------------
-        # Envoi de SMS
-        # ------------------------------
-        if st.button("📲 Envoyer tous les SMS maintenant"):
-            for index, row in arrivants.iterrows():
-                message = f"Bonjour {row['nom_client']} 👋, nous vous attendons demain pour votre séjour !"
-                try:
-                    sms = client.messages.create(
-                        body=message,
-                        from_=TWILIO_NUMBER,
-                        to=row["telephone"]
-                    )
-                    st.success(f"✅ SMS envoyé à {row['nom_client']} ({row['telephone']})")
-                except Exception as e:
-                    st.error(f"❌ Erreur pour {row['nom_client']}: {e}")
+    # Vérification de colonnes attendues
+    required_columns = {"nom_client", "date_arrivee", "telephone"}
+    if not required_columns.issubset(df.columns):
+        st.error("Le fichier doit contenir les colonnes : nom_client, date_arrivee, telephone")
     else:
-        st.warning(f"Aucune réservation prévue pour demain ({demain})")
+        # Convertir la colonne date_arrivee
+        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
 
+        # Filtrer pour les clients qui arrivent demain
+        today = datetime.date.today()
+        tomorrow = today + datetime.timedelta(days=1)
+
+        df_tomorrow = df[df["date_arrivee"].dt.date == tomorrow]
+
+        if df_tomorrow.empty:
+            st.warning(f"Aucun client avec une arrivée prévue le {tomorrow}.")
+        else:
+            st.success(f"{len(df_tomorrow)} client(s) arrivent demain ({tomorrow}).")
+
+            if st.button("📤 Envoyer les SMS de rappel"):
+                # Récupérer les clés depuis les secrets
+                sid = os.environ.get("TWILIO_SID")
+                token = os.environ.get("TWILIO_TOKEN")
+                sender = os.environ.get("TWILIO_NUMBER")
+
+                if not all([sid, token, sender]):
+                    st.error("Clés Twilio manquantes. Vérifiez vos secrets dans Streamlit Cloud.")
+                else:
+                    client = Client(sid, token)
+                    for _, row in df_tomorrow.iterrows():
+                        try:
+                            msg = f"Bonjour {row['nom_client']}, votre arrivée est prévue demain. À bientôt !"
+                            message = client.messages.create(
+                                body=msg,
+                                from_=sender,
+                                to=row["telephone"]
+                            )
+                            st.success(f"✅ SMS envoyé à {row['nom_client']} ({row['telephone']})")
+                        except Exception as e:
+                            st.error(f"❌ Échec pour {row['telephone']} : {e}")
