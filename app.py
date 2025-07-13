@@ -7,7 +7,6 @@ from twilio.rest import Client
 st.set_page_config(page_title="Extranet · Rappels SMS", layout="centered")
 
 st.title("📩 Envoi automatique de SMS aux clients")
-
 st.markdown("Importez un fichier `.csv` contenant les réservations à venir.")
 
 uploaded_file = st.file_uploader("Importer un fichier CSV", type="csv")
@@ -18,10 +17,11 @@ if uploaded_file:
     st.subheader("📋 Données chargées :")
     st.dataframe(df)
 
-        if not required_columns.issubset(df.columns):
+    required_columns = {"nom_client", "date_arrivee", "telephone"}
+
+    if not required_columns.issubset(df.columns):
         st.error("Le fichier doit contenir les colonnes : nom_client, date_arrivee, telephone")
     else:
-        # Convertir les dates
         df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
         today = datetime.date.today()
         tomorrow = today + datetime.timedelta(days=1)
@@ -33,10 +33,7 @@ if uploaded_file:
         else:
             st.success(f"{len(df_tomorrow)} client(s) arrivent demain ({tomorrow}).")
 
-            # 🔥 C'est ici le bouton :
-            send_sms = st.button("📤 Envoyer les SMS de rappel")
-
-            if send_sms:
+            if st.button("📤 Envoyer les SMS de rappel"):
                 sid = os.environ.get("TWILIO_SID")
                 token = os.environ.get("TWILIO_TOKEN")
                 sender = os.environ.get("TWILIO_NUMBER")
@@ -56,3 +53,4 @@ if uploaded_file:
                             st.success(f"✅ SMS envoyé à {row['nom_client']} ({row['telephone']})")
                         except Exception as e:
                             st.error(f"❌ Erreur pour {row['telephone']} : {e}")
+
