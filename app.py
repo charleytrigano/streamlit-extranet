@@ -28,6 +28,8 @@ if uploaded_file:
 
         df_tomorrow = df[df["date_arrivee"].dt.date == tomorrow]
 
+        st.write(df_tomorrow)
+
         if df_tomorrow.empty:
             st.warning(f"Aucun client avec une arrivée prévue le {tomorrow}.")
         else:
