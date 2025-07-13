@@ -1,53 +1,64 @@
 import streamlit as st
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+from twilio.rest import Client
+import os
+from dotenv import load_dotenv
 
-st.set_page_config(page_title="Données Airbnb & Booking", layout="centered")
+# 🔐 Chargement des identifiants Twilio depuis le fichier .env
+load_dotenv()
 
+TWILIO_SID = os.getenv("TWILIO_SID")
+TWILIO_TOKEN = os.getenv("TWILIO_TOKEN")
+TWILIO_NUMBER = os.getenv("TWILIO_NUMBER")
+
+client = Client(TWILIO_SID, TWILIO_TOKEN)
+
+# ------------------------------
+# Interface Streamlit
+# ------------------------------
+st.set_page_config(page_title="📅 Réservations Automatisées", layout="centered")
 st.title("🏨 Récupération des données Airbnb & Booking")
 
-st.write("Cette application extrait des données publiques depuis des pages Airbnb ou Booking.")
+st.markdown("Cette application vous permet d'importer vos réservations 📄 et de planifier un envoi de **SMS automatique** 📲.")
 
-plateforme = st.radio("Choisissez une plateforme :", ["Airbnb", "Booking"])
-url = st.text_input("Entrez l'URL d'une annonce publique :")
+# ------------------------------
+# Upload du fichier CSV
+# ------------------------------
+uploaded_file = st.file_uploader("📂 Importer vos réservations (CSV)", type=["csv"])
 
-def get_booking_data(url):
-    try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        soup = BeautifulSoup(r.text, 'html.parser')
-        title = soup.title.string if soup.title else "Titre non trouvé"
-        return {
-            "Titre": title,
-            "URL": url,
-            "Plateforme": "Booking"
-        }
-    except Exception as e:
-        return {"Erreur": str(e)}
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
 
-def get_airbnb_data(url):
-    try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        soup = BeautifulSoup(r.text, 'html.parser')
-        title = soup.title.string if soup.title else "Titre non trouvé"
-        return {
-            "Titre": title,
-            "URL": url,
-            "Plateforme": "Airbnb"
-        }
-    except Exception as e:
-        return {"Erreur": str(e)}
+    st.subheader("📋 Réservations chargées :")
+    st.dataframe(df)
 
-if st.button("🔎 Extraire les données"):
-    if url:
-        if "booking" in url.lower():
-            result = get_booking_data(url)
-        elif "airbnb" in url.lower():
-            result = get_airbnb_data(url)
-        else:
-            result = {"Erreur": "URL non reconnue. Vérifiez qu'il s'agit bien d'un lien Airbnb ou Booking."}
-        st.write("### Résultat :")
-        st.json(result)
+    # ------------------------------
+    # Filtrage : clients qui arrivent demain
+    # ------------------------------
+    demain = (datetime.now() + timedelta(days=1)).date()
+    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"]).dt.date
+    arrivants = df[df["date_arrivee"] == demain]
+
+    if not arrivants.empty:
+        st.success(f"{len(arrivants)} client(s) prévu(s) pour demain ({demain})")
+        st.dataframe(arrivants)
+
+        # ------------------------------
+        # Envoi de SMS
+        # ------------------------------
+        if st.button("📲 Envoyer tous les SMS maintenant"):
+            for index, row in arrivants.iterrows():
+                message = f"Bonjour {row['nom_client']} 👋, nous vous attendons demain pour votre séjour !"
+                try:
+                    sms = client.messages.create(
+                        body=message,
+                        from_=TWILIO_NUMBER,
+                        to=row["telephone"]
+                    )
+                    st.success(f"✅ SMS envoyé à {row['nom_client']} ({row['telephone']})")
+                except Exception as e:
+                    st.error(f"❌ Erreur pour {row['nom_client']}: {e}")
     else:
-        st.warning("Veuillez saisir une URL.")
+        st.warning(f"Aucune réservation prévue pour demain ({demain})")
 
