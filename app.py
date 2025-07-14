@@ -20,7 +20,7 @@ if csv_file is not None:
     else:
         # Convertir les dates
        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-        df["date_depart"] = pd.to_datetime(df["date_depart"])
+        df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
 
         # Créer les événements du calendrier
         events = []
