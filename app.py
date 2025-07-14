@@ -1,58 +1,49 @@
 import streamlit as st
 import pandas as pd
-import datetime
-import os
-from twilio.rest import Client
+import plotly.express as px
 
-st.set_page_config(page_title="Extranet · Rappels SMS", layout="centered")
+st.set_page_config(page_title="Calendrier des réservations", layout="wide")
 
-st.title("📩 Envoi automatique de SMS aux clients")
-st.markdown("Importez un fichier `.csv` contenant les réservations à venir.")
+st.title("📅 Calendrier des réservations")
+st.write("Visualisez vos réservations Airbnb, Booking et autres avec un code couleur par plateforme.")
 
-uploaded_file = st.file_uploader("Importer un fichier CSV", type="csv")
+# Chargement du fichier CSV
+csv_file = st.file_uploader("Importer le fichier reservations.csv", type="csv")
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-
-    st.subheader("📋 Données chargées :")
-    st.dataframe(df)
-
-    required_columns = {"nom_client", "date_arrivee", "telephone"}
-
-    if not required_columns.issubset(df.columns):
-        st.error("Le fichier doit contenir les colonnes : nom_client, date_arrivee, telephone")
+if csv_file:
+    df = pd.read_csv(csv_file)
+    
+    # Vérification des colonnes attendues
+    required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme"}
+    if not required_cols.issubset(df.columns):
+        st.error("❌ Le fichier CSV doit contenir les colonnes : nom_client, date_arrivee, date_depart, plateforme")
     else:
-        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-        today = datetime.date.today()
-        tomorrow = today + datetime.timedelta(days=1)
+        # Conversion des dates
+        df['date_arrivee'] = pd.to_datetime(df['date_arrivee'])
+        df['date_depart'] = pd.to_datetime(df['date_depart'])
+        df['duree'] = (df['date_depart'] - df['date_arrivee']).dt.days
 
-        df_tomorrow = df[df["date_arrivee"].dt.date == tomorrow]
+        # Dupliquer les lignes pour chaque jour de la réservation
+        expanded_rows = []
+        for _, row in df.iterrows():
+            for i in range(row['duree']):
+                new_date = row['date_arrivee'] + pd.Timedelta(days=i)
+                expanded_rows.append({
+                    "nom_client": row["nom_client"],
+                    "date": new_date,
+                    "plateforme": row["plateforme"]
+                })
+        calendar_df = pd.DataFrame(expanded_rows)
 
-        st.write(df_tomorrow)
+        # Affichage avec Plotly
+        fig = px.timeline(calendar_df,
+                          x_start="date",
+                          x_end="date",
+                          y="nom_client",
+                          color="plateforme",
+                          title="Réservations par jour et par client",
+                          labels={"date": "Date", "nom_client": "Client", "plateforme": "Plateforme"})
+        fig.update_yaxes(autorange="reversed")  # pour afficher du haut vers le bas
+        fig.update_layout(height=600)
 
-        if df_tomorrow.empty:
-            st.warning(f"Aucun client avec une arrivée prévue le {tomorrow}.")
-        else:
-            st.success(f"{len(df_tomorrow)} client(s) arrivent demain ({tomorrow}).")
-
-            if st.button("📤 Envoyer les SMS de rappel"):
-                sid = os.environ.get("TWILIO_SID")
-                token = os.environ.get("TWILIO_TOKEN")
-                sender = os.environ.get("TWILIO_NUMBER")
-
-                if not all([sid, token, sender]):
-                    st.error("Clés Twilio manquantes. Vérifiez vos secrets dans Streamlit Cloud.")
-                else:
-                    client = Client(sid, token)
-                    for _, row in df_tomorrow.iterrows():
-                        try:
-                            msg = f"Bonjour {row['nom_client']}, votre arrivée est prévue demain. À bientôt !"
-                            message = client.messages.create(
-                                body=msg,
-                                from_=sender,
-                                to=row["telephone"]
-                            )
-                            st.success(f"✅ SMS envoyé à {row['nom_client']} ({row['telephone']})")
-                        except Exception as e:
-                            st.error(f"❌ Erreur pour {row['telephone']} : {e}")
-
+        st.plotly_chart(fig, use_container_width=True)
