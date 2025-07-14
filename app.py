@@ -19,7 +19,7 @@ if csv_file is not None:
         st.error(f"Le fichier doit contenir les colonnes : {required_cols}")
     else:
         # Convertir les dates
-        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"])
+       df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
         df["date_depart"] = pd.to_datetime(df["date_depart"])
 
         # Créer les événements du calendrier
