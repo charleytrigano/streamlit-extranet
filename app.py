@@ -12,7 +12,9 @@ csv_file = st.file_uploader("Importer le fichier reservations.csv", type="csv")
 
 if csv_file:
     df = pd.read_csv(csv_file, sep=";", on_bad_lines='skip', engine='python')
-    
+    st.write("✅ Fichier chargé avec succès")
+st.dataframe(df.head())
+
     # Vérification des colonnes attendues
     required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme"}
     if not required_cols.issubset(df.columns):
