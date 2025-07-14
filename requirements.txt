@@ -3,5 +3,6 @@ pandas
 twilio
 python-dotenv
 plotly
+pip install streamlit-calendar
 
 
