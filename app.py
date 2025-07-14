@@ -1,49 +1,44 @@
 import streamlit as st
 import pandas as pd
-from streamlit_calendar import calendar
+import plotly.express as px
 
 st.set_page_config(page_title="📅 Calendrier des Réservations", layout="wide")
-st.title("📅 Calendrier Google-like des réservations")
 
-# Importer fichier CSV
-csv_file = st.file_uploader("📁 Importer un fichier CSV", type=["csv"])
-if csv_file is not None:
+st.title("🏨 Calendrier des Réservations")
+st.markdown("Importez un fichier **CSV** avec les colonnes : `nom_client`, `date_arrivee`, `date_depart`, `plateforme`")
+
+uploaded_file = st.file_uploader("📁 Importer le fichier CSV", type="csv")
+
+if uploaded_file:
     try:
-        df = pd.read_csv(csv_file, sep=";")  # Si ton fichier utilise des ;
-    except:
-        df = pd.read_csv(csv_file)
+        df = pd.read_csv(uploaded_file, sep=";")
 
-    # Vérifier les colonnes
-    required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme"}
-    if not required_cols.issubset(df.columns):
-        st.error(f"Le fichier doit contenir les colonnes : {required_cols}")
-    else:
-        # Convertir les dates      
-        # Convertir les colonnes de dates en format datetime
-df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+        required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme"}
+        if not required_cols.issubset(df.columns):
+            st.error(f"❌ Le fichier doit contenir les colonnes suivantes : {', '.join(required_cols)}")
+        else:
+            # Conversion des dates
+            df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+            df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
 
+            st.success("✅ Fichier importé avec succès")
+            st.dataframe(df)
 
-        # Créer les événements du calendrier
-        events = []
-        for _, row in df.iterrows():
-            couleur = "#1E90FF" if row["plateforme"].lower() == "airbnb" else "#32CD32"
-            events.append({
-                "title": f"{row['nom_client']} ({row['plateforme']})",
-                "start": row["date_arrivee"].strftime("%Y-%m-%d"),
-                "end": (row["date_depart"] + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
-                "color": couleur
-            })
+            # Création du calendrier
+            fig = px.timeline(
+                df,
+                x_start="date_arrivee",
+                x_end="date_depart",
+                y="nom_client",
+                color="plateforme",
+                title="Vue calendrier des séjours",
+                labels={"nom_client": "Client", "plateforme": "Plateforme"}
+            )
 
-        # Options du calendrier
-        options = {
-            "initialView": "dayGridMonth",
-            "locale": "fr",
-            "height": 700
-        }
+            fig.update_yaxes(autorange="reversed")  # Clients dans l'ordre
+            st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("### 🗓️ Vue calendrier")
-        calendar(events=events, options=options)
-
-        st.markdown("### 📋 Données chargées")
-        st.dataframe(df)
+    except Exception as e:
+        st.error(f"❌ Erreur lors du traitement du fichier : {e}")
+else:
+    st.info("📤 Veuillez importer un fichier CSV pour afficher les réservations.")
