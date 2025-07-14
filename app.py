@@ -11,7 +11,7 @@ st.write("Visualisez vos réservations Airbnb, Booking et autres avec un code co
 csv_file = st.file_uploader("Importer le fichier reservations.csv", type="csv")
 
 if csv_file:
-    df = pd.read_csv(csv_file)
+    df = pd.read_csv(csv_file, sep=";")
     
     # Vérification des colonnes attendues
     required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme"}
