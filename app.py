@@ -18,9 +18,11 @@ if csv_file is not None:
     if not required_cols.issubset(df.columns):
         st.error(f"Le fichier doit contenir les colonnes : {required_cols}")
     else:
-        # Convertir les dates
-       df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-        df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+        # Convertir les dates      
+        # Convertir les colonnes de dates en format datetime
+df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+
 
         # Créer les événements du calendrier
         events = []
