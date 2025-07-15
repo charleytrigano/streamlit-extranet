@@ -1,5 +1,7 @@
 streamlit==1.46.0
 pandas
 streamlit-calendar
+python-dotenv
+requests
 
 
