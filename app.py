@@ -53,7 +53,12 @@ if csv_file is not None:
 
                 if st.button("📤 Envoyer les SMS Free Mobile"):
                     for _, row in df_demain.iterrows():
-                        message = f"Rappel : {row['nom_client']} arrive demain ({row['date_arrivee'].strftime('%d/%m/%Y')}) via {row['plateforme']}."
+                        message = (f"Reservation : {row['plateforme']}\n"
+    f"Client       : {row['nom_client']}\n"
+    f"Arrive le    : {row['date_arrivee'].strftime('%d/%m/%Y')}\n"
+    f"Depart le    : {row['date_depart'].strftime('%d/%m/%Y')}"
+)
+
                         response = requests.get(
                             "https://smsapi.free-mobile.fr/sendmsg",
                             params={
