@@ -1,75 +1,73 @@
 import streamlit as st
 import pandas as pd
-import requests
-from datetime import datetime, timedelta
 import plotly.express as px
+import datetime
+import requests
+import os
+from dotenv import load_dotenv
 
-# ---------------------------
-# PARAMÈTRES API Free Mobile
-# ---------------------------
-FREE_USER = "12026027"
-FREE_API_KEY = "MF7Qjs3C8KxKHz"
+# 🔐 Charger les variables d’environnement
+load_dotenv()
+FREE_USER = os.getenv("FREE_USER")
+FREE_API = os.getenv("FREE_API")
+DESTINATAIRE_SMS = "+33617722379"  # Numéro autorisé (Free)
 
-st.set_page_config(page_title="Portail Extranet Streamlit", layout="centered")
-st.title("📆 Calendrier des Réservations + SMS Rappel")
+st.set_page_config(page_title="📅 Extranet Réservations", layout="wide")
+st.title("🏨 Récupération des réservations & 📩 SMS automatiques")
 
-st.markdown("Importez un fichier `.csv` contenant les réservations.")
-csv_file = st.file_uploader("📎 Importer un fichier CSV", type="csv")
+st.markdown("Importez un fichier `.csv` avec les colonnes : `nom_client`, `date_arrivee`, `date_depart`, `plateforme`, `telephone`")
+
+csv_file = st.file_uploader("📁 Importer le fichier CSV", type=["csv"])
 
 if csv_file is not None:
     try:
-        # Lire le fichier CSV avec le bon séparateur
         df = pd.read_csv(csv_file, sep=";")
-        
-        # Nettoyage des dates
+
+        # Dates au bon format
         df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
         df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
 
+        # Vérification des colonnes
         required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone"}
         if not required_cols.issubset(df.columns):
-            st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(required_cols)}")
+            st.error(f"Le fichier doit contenir les colonnes suivantes : {', '.join(required_cols)}")
         else:
-            st.success("✅ Données chargées avec succès.")
+            st.success("✅ Données importées")
             st.dataframe(df)
 
-            # 🗓️ Affichage calendrier
-            st.subheader("📅 Visualisation des réservations")
-            df_gantt = df.rename(columns={
-                "nom_client": "Task",
-                "date_arrivee": "Start",
-                "date_depart": "Finish",
-                "plateforme": "Resource"
-            })
+            # 🟦 Calendrier visuel
+            st.subheader("📅 Vue calendrier des séjours")
+            df_events = df.copy()
+            df_events["label"] = df_events["nom_client"] + " (" + df_events["plateforme"] + ")"
 
-            fig = px.timeline(df_gantt, x_start="Start", x_end="Finish", y="Task", color="Resource")
+            fig = px.timeline(df_events, x_start="date_arrivee", x_end="date_depart", y="label", color="plateforme")
             fig.update_yaxes(autorange="reversed")
             st.plotly_chart(fig, use_container_width=True)
 
-            # 🔔 SMS automatiques
-            st.subheader("📩 Envoi automatique de SMS aux clients arrivant demain")
-
-            demain = datetime.today() + timedelta(days=1)
-            demain_str = demain.strftime("%Y-%m-%d")
-            df_demain = df[df["date_arrivee"] == demain_str]
+            # 🔔 Filtrage des clients arrivant demain
+            demain = datetime.date.today() + datetime.timedelta(days=1)
+            df_demain = df[df["date_arrivee"].dt.date == demain]
 
             if not df_demain.empty:
-                for _, row in df_demain.iterrows():
-                    message = f"Bonjour {row['nom_client']}, nous vous attendons demain dans votre logement réservé sur {row['plateforme']}."
-                    numero = str(row['telephone'])
+                st.warning(f"📨 {len(df_demain)} client(s) arrivent demain ({demain})")
 
-                    url = f"https://smsapi.free-mobile.fr/sendmsg?user={FREE_USER}&pass={FREE_API_KEY}&msg={message}"
-
-                    try:
-                        response = requests.get(url)
+                if st.button("📤 Envoyer les SMS Free Mobile"):
+                    for _, row in df_demain.iterrows():
+                        message = f"Rappel : {row['nom_client']} arrive demain ({row['date_arrivee'].strftime('%d/%m/%Y')}) via {row['plateforme']}."
+                        response = requests.get(
+                            "https://smsapi.free-mobile.fr/sendmsg",
+                            params={
+                                "user": FREE_USER,
+                                "pass": FREE_API,
+                                "msg": message
+                            }
+                        )
                         if response.status_code == 200:
-                            st.success(f"✅ SMS envoyé à {numero}")
+                            st.success(f"✅ SMS envoyé : {message}")
                         else:
-                            st.error(f"❌ Échec pour {numero} (code {response.status_code})")
-                    except Exception as e:
-                        st.error(f"❌ Erreur pour {numero} : {str(e)}")
+                            st.error(f"❌ Erreur d'envoi pour {row['nom_client']}. Code HTTP : {response.status_code}")
             else:
-                st.info("Aucune arrivée prévue demain. Aucun SMS envoyé.")
+                st.info("📭 Aucun client prévu demain.")
 
     except Exception as e:
-        st.error(f"❌ Erreur lors du chargement du fichier : {e}")
-
+        st.error(f"Erreur lors du traitement du fichier : {e}")
