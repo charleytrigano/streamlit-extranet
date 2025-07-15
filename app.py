@@ -10,6 +10,33 @@ st.set_page_config(page_title="📅 Calendrier des Réservations", layout="wide"
 
 st.title("🏨 Calendrier des Réservations")
 st.markdown("Importez un fichier **CSV** avec les colonnes : `nom_client`, `date_arrivee`, `date_depart`, `plateforme`")
+# 📦 Charger les variables d'environnement
+load_dotenv()
+FREE_USER = os.getenv("FREE_USER")
+FREE_API_KEY = os.getenv("FREE_API_KEY")
+
+# 📅 Vérifier les arrivées demain
+if st.button("📩 Envoyer les SMS clients arrivant demain"):
+    demain = datetime.today() + timedelta(days=1)
+    demain_str = demain.strftime("%Y-%m-%d")
+    
+    df_demain = df[df["date_arrivee"] == demain_str]
+    
+    if df_demain.empty:
+        st.info("Aucun client n’arrive demain.")
+    else:
+        for index, row in df_demain.iterrows():
+            message = f"Bonjour {row['nom_client']}, nous vous attendons demain pour votre réservation via {row['plateforme']} !"
+            url = f"https://smsapi.free-mobile.fr/sendmsg?user={FREE_USER}&pass={FREE_API_KEY}&msg={requests.utils.quote(message)}"
+            
+            try:
+                response = requests.get(url)
+                if response.status_code == 200:
+                    st.success(f"✅ SMS envoyé à {row['nom_client']}")
+                else:
+                    st.error(f"❌ Échec SMS à {row['nom_client']} : {response.status_code}")
+            except Exception as e:
+                st.error(f"❌ Erreur pour {row['nom_client']} : {e}")
 
 uploaded_file = st.file_uploader("📁 Importer le fichier CSV", type="csv")
 
