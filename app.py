@@ -26,7 +26,7 @@ if csv_file is not None:
         df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
         df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
 
-        required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone"}
+        required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone", "prix_brut", "prix_net", "charges", "%"}
         if not required_cols.issubset(df.columns):
             st.error("❌ Le fichier doit contenir les colonnes : nom_client, date_arrivee, date_depart, plateforme, telephone")
         else:
