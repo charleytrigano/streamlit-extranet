@@ -4,24 +4,27 @@ import requests
 from datetime import datetime, timedelta
 import plotly.express as px
 
-# Identifiants Free Mobile (ne pas partager publiquement)
-FREE_USER = "12026027"
-FREE_API = "MF7Qjs3C8KxKHz"
+# 🎯 Identifiants Free Mobile
+FREE_USER_1 = "12026027"
+FREE_API_1 = "MF7Qjs3C8KxKHz"
+TEL_ADMIN_1 = "+33617722379"
+
+# Deuxième numéro de notification (admin)
+FREE_USER_2 = "12026027"
+FREE_API_2 = "1Pat6vSRCLiSXl"
+TEL_ADMIN_2 = "+33611772793"
 
 st.set_page_config(page_title="Extranet · Réservations", page_icon="📆", layout="centered")
 
 st.title("📩 Envoi automatique de SMS aux clients")
 st.write("Importez un fichier .csv contenant les réservations à venir.")
 
-# Upload CSV
 csv_file = st.file_uploader("Importer un fichier CSV", type=["csv"])
 
 if csv_file is not None:
     try:
-        # Lecture du fichier CSV avec séparateur ;
         df = pd.read_csv(csv_file, sep=";")
 
-        # Nettoyage des dates
         df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
         df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
 
@@ -32,7 +35,6 @@ if csv_file is not None:
             st.success("📋 Données chargées :")
             st.dataframe(df)
 
-            # Filtrer les clients qui arrivent demain
             demain = datetime.now() + timedelta(days=1)
             demain_str = demain.strftime("%Y-%m-%d")
             df_demain = df[df["date_arrivee"].dt.strftime("%Y-%m-%d") == demain_str]
@@ -41,34 +43,38 @@ if csv_file is not None:
             st.dataframe(df_demain)
 
             if not df_demain.empty:
-                st.subheader("📨 Envoi des SMS en cours...")
+                st.subheader("📨 Envoi des SMS...")
 
                 for _, row in df_demain.iterrows():
-                    message = (
+                    msg = (
                         f"Reservation : {row['plateforme']}\n"
                         f"Client       : {row['nom_client']}\n"
                         f"Arrive le    : {row['date_arrivee'].strftime('%d/%m/%Y')}\n"
                         f"Depart le    : {row['date_depart'].strftime('%d/%m/%Y')}"
                     )
 
-                    response = requests.get(
+                    # Envoi au client (FREE_USER_1)
+                    res1 = requests.get(
                         "https://smsapi.free-mobile.fr/sendmsg",
-                        params={
-                            "user": FREE_USER,
-                            "pass": FREE_API,
-                            "msg": message
-                        }
+                        params={"user": FREE_USER_1, "pass": FREE_API_1, "msg": msg}
                     )
 
-                    if response.status_code == 200:
-                        st.success(f"✅ SMS envoyé :\n{message}")
+                    # Envoi au second numéro (FREE_USER_2)
+                    res2 = requests.get(
+                        "https://smsapi.free-mobile.fr/sendmsg",
+                        params={"user": FREE_USER_2, "pass": FREE_API_2, "msg": msg}
+                    )
+
+                    # Affichage
+                    if res1.status_code == 200 and res2.status_code == 200:
+                        st.success(f"✅ SMS envoyés pour {row['nom_client']}")
                     else:
-                        st.error(f"❌ Erreur d'envoi pour {row['nom_client']}. Code HTTP : {response.status_code}")
+                        st.error(f"❌ Erreur pour {row['nom_client']} | Codes : {res1.status_code}, {res2.status_code}")
             else:
                 st.info("✅ Aucun client n'arrive demain.")
 
-            # Visualisation calendrier
-            st.subheader("📊 Visualisation des réservations")
+            # 🎨 Visualisation calendrier
+            st.subheader("📊 Calendrier des réservations")
             df_calendar = df.copy()
             df_calendar["nom_affiche"] = df_calendar["nom_client"] + " (" + df_calendar["plateforme"] + ")"
 
@@ -78,7 +84,7 @@ if csv_file is not None:
                 x_end="date_depart",
                 y="nom_affiche",
                 color="plateforme",
-                title="Calendrier des réservations"
+                title="Visualisation des séjours"
             )
             fig.update_yaxes(autorange="reversed")
             st.plotly_chart(fig, use_container_width=True)
@@ -88,3 +94,4 @@ if csv_file is not None:
 
 st.markdown("---")
 st.caption("Développé avec ❤️ par [charleytrigano](https://github.com/charleytrigano)")
+
