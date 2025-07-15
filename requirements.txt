@@ -1,7 +1,6 @@
-streamlit==1.46.0
+streamlit
 pandas
-streamlit-calendar
+plotly
 python-dotenv
 requests
-
 
