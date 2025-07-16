@@ -13,7 +13,7 @@ csv_file = st.file_uploader("Importer un fichier CSV", type=["csv"])
 if csv_file is not None:
     try:
         # Lecture avec séparateur ";"
-        df = pd.read_csv(csv_file, sep=";")
+        df = pd.read_excel(csv_file)
         df.columns = df.columns.str.strip().str.lower()  # Nettoyage des noms de colonnes
 
         # Conversion des colonnes de date
