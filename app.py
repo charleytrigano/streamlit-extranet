@@ -87,6 +87,9 @@ if csv_file is not None:
     except Exception as e:
         st.error(f"❌ Une erreur est survenue : {e}")
 
+    st.write("🧪 Colonnes détectées :", df.columns.tolist())
+    df = pd.read_csv(csv_file, sep=";")
+
 
 
 
