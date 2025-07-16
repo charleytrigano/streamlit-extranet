@@ -86,3 +86,47 @@ if xlsx_file is not None:
     except Exception as e:
         st.error(f"Erreur lors de la lecture du fichier : {e}")
 
+import plotly.figure_factory as ff
+
+# -------------------------------------------
+# CALENDRIER VISUEL
+# -------------------------------------------
+st.subheader("🗓️ Calendrier des réservations")
+
+# Regrouper les données dans un format pour le calendrier
+if not df.empty:
+    calendrier_data = []
+
+    color_map = {
+        "Airbnb": "rgb(255, 127, 80)",    # orange
+        "Booking": "rgb(100, 149, 237)",  # bleu
+        "Autre": "rgb(144, 238, 144)"     # vert clair
+    }
+
+    for _, row in df.iterrows():
+        plateforme = row["plateforme"]
+        couleur = color_map.get(plateforme, "gray")
+
+        calendrier_data.append(dict(
+            Task=f"{row['nom_client']} ({plateforme})",
+            Start=str(row["date_arrivee"].date()),
+            Finish=str(row["date_depart"].date()),
+            Resource=plateforme
+        ))
+
+    fig = ff.create_gantt(
+        calendrier_data,
+        index_col='Resource',
+        colors=color_map,
+        show_colorbar=True,
+        group_tasks=True,
+        showgrid_x=True,
+        title="📅 Réservations du mois",
+        bar_width=0.3
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("Aucune donnée pour générer le calendrier.")
+
+
