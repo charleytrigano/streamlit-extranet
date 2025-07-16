@@ -1,134 +1,89 @@
 import streamlit as st
 import pandas as pd
+import datetime
 import requests
-import plotly.figure_factory as ff
-from datetime import datetime, timedelta
+import plotly.express as px
 
-st.set_page_config(page_title="Extranet Réservations", layout="wide")
-st.title("📩 Envoi automatique de SMS aux clients")
-st.write("Importez un fichier **.xlsx** contenant les réservations à venir.")
+st.set_page_config(page_title="📆 Extranet Streamlit", layout="wide")
+st.title("📆 Portail Extranet - Calendrier et SMS")
 
-# --------------------------
-# Paramètres pour Free Mobile
-# --------------------------
-FREE_API_1 = {
-    "user": "12026027",
-    "key": "1Pat6vSRCLiSXl",
-    "telephone": "+33617722379"
-}
-FREE_API_2 = {
-    "user": "12026027",
-    "key": "MF7Qjs3C8KxKHz",
-    "telephone": "+33611772793"
-}
+st.markdown("Importez un fichier `.xlsx` avec les réservations. Il doit contenir les colonnes suivantes :")
+st.code("nom_client, date_arrivee, date_depart, plateforme, telephone, prix_brut, prix_net, charges, %")
 
-# --------------------------
-# Import du fichier .xlsx
-# --------------------------
-csv_file = st.file_uploader("📁 Importer un fichier XLSX", type=["xlsx"])
+# ⏳ Upload du fichier Excel
+excel_file = st.file_uploader("📁 Importer un fichier Excel", type=["xlsx"])
 
-if csv_file is not None:
+# 📅 Date d'aujourd'hui et demain
+aujourd_hui = datetime.date.today()
+demain = aujourd_hui + datetime.timedelta(days=1)
+demain_str = demain.strftime("%Y-%m-%d")
+
+# 📩 Paramètres pour API Free Mobile (modifie avec tes infos)
+FREE_SMS_USERS = [
+    {"user": "12026027", "api_key": "1Pat6vSRCLiSXl", "tel": "+33617722379"},
+    {"user": "12026027", "api_key": "1Pat6vSRCLiSXl", "tel": "+33611772793"},
+]
+
+# 📦 Traitement du fichier
+if excel_file:
     try:
-        df = pd.read_excel(csv_file)
+        df = pd.read_excel(excel_file, engine="openpyxl")
 
-        # Nettoyage des dates
-        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-        df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
-
-        # Colonnes requises
-        required_cols = {
-            "nom_client", "date_arrivee", "date_depart",
-            "plateforme", "telephone",
-            "prix_brut", "prix_net", "charges", "%"
-        }
-
-        if not required_cols.issubset(df.columns):
-            st.error("❌ Le fichier doit contenir les colonnes : " + ", ".join(required_cols))
+        # 🧼 Vérif des colonnes requises
+        required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone", "prix_brut", "prix_net", "charges", "%"}
+        if not required_cols.issubset(set(df.columns)):
+            st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(sorted(required_cols))}")
         else:
-            st.success("✅ Fichier chargé avec succès.")
+            # ✅ Conversion des dates
+            df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce").dt.date
+            df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce").dt.date
+
+            st.success("✅ Données correctement importées !")
             st.dataframe(df)
 
-            # --------------------------
-            # ENVOI DE SMS 24h avant
-            # --------------------------
-            demain = datetime.now().date() + timedelta(days=1)
-            df_demain = df[df["date_arrivee"].dt.date == demain]
+            # 📅 Affichage calendrier Plotly
+            st.subheader("📊 Calendrier des réservations")
+            calendar_df = df.copy()
+            calendar_df["Durée"] = calendar_df["date_depart"] - calendar_df["date_arrivee"]
+            calendar_df["nom_affiche"] = calendar_df["nom_client"] + " (" + calendar_df["plateforme"] + ")"
 
-            if not df_demain.empty:
-                st.subheader("📤 Envoi des SMS prévus pour demain")
-
-                for _, row in df_demain.iterrows():
-                    message = f"""Bonjour {row['nom_client']} 👋
-
-Nous sommes heureux de vous accueillir demain à Nice.
-🅿️ Un emplacement de parking est à votre disposition sur place.
-
-Merci de nous indiquer votre heure approximative d’arrivée
-afin que nous puissions nous rendre disponible.
-
-📅 Réservation via {row['plateforme']}
-⏱️ Arrivée : {row['date_arrivee'].date()} 
-🏁 Départ : {row['date_depart'].date()}
-
-Bon voyage et à demain !
-— Annick & Charley"""
-
-                    for free_api in [FREE_API_1, FREE_API_2]:
-                        try:
-                            r = requests.get(
-                                f"https://smsapi.free-mobile.fr/sendmsg",
-                                params={
-                                    "user": free_api["user"],
-                                    "pass": free_api["key"],
-                                    "msg": message
-                                }
-                            )
-                            if r.status_code == 200:
-                                st.success(f"📨 SMS envoyé à {free_api['telephone']}")
-                            else:
-                                st.error(f"❌ Erreur envoi vers {free_api['telephone']} — Code : {r.status_code}")
-                        except Exception as e:
-                            st.error(f"❌ Exception : {e}")
-            else:
-                st.info("Aucun client prévu pour demain.")
-
-            # --------------------------
-            # CALENDRIER VISUEL
-            # --------------------------
-            st.subheader("🗓️ Calendrier des réservations")
-
-            calendrier_data = []
-            color_map = {
-                "Airbnb": "rgb(255, 127, 80)",
-                "Booking": "rgb(100, 149, 237)",
-                "Autre": "rgb(144, 238, 144)"
-            }
-
-            for _, row in df.iterrows():
-                plateforme = row["plateforme"]
-                couleur = color_map.get(plateforme, "gray")
-
-                calendrier_data.append(dict(
-                    Task=f"{row['nom_client']} ({plateforme})",
-                    Start=str(row["date_arrivee"].date()),
-                    Finish=str(row["date_depart"].date()),
-                    Resource=plateforme
-                ))
-
-            fig = ff.create_gantt(
-                calendrier_data,
-                index_col='Resource',
-                colors=color_map,
-                show_colorbar=True,
-                group_tasks=True,
-                showgrid_x=True,
-                title="📅 Réservations du mois",
-                bar_width=0.3
+            fig = px.timeline(
+                calendar_df,
+                x_start="date_arrivee",
+                x_end="date_depart",
+                y="nom_affiche",
+                color="plateforme",
+                title="Calendrier des séjours"
             )
+            fig.update_yaxes(autorange="reversed")
+            fig.update_layout(height=600)
             st.plotly_chart(fig, use_container_width=True)
 
+            # 📩 Envoi automatique de SMS pour les arrivées demain
+            st.subheader("📩 Envoi automatique de SMS aux clients arrivant demain")
+            df_demain = df[df["date_arrivee"] == demain]
+
+            if not df_demain.empty:
+                for _, row in df_demain.iterrows():
+                    msg = (
+                        f"Bonjour {row['nom_client']},\n"
+                        "Nous sommes heureux de vous accueillir demain à Nice.\n"
+                        "Un emplacement de parking est à votre disposition sur place.\n"
+                        "Merci de nous indiquer votre heure approximative d'arrivée.\n"
+                        "Bon voyage et à demain !\nAnnick & Charley"
+                    )
+                    for user in FREE_SMS_USERS:
+                        url = f"https://smsapi.free-mobile.fr/sendmsg?user={user['user']}&pass={user['api_key']}&msg={requests.utils.quote(msg)}"
+                        response = requests.get(url)
+                        if response.status_code == 200:
+                            st.success(f"✅ SMS envoyé à {row['nom_client']} pour {user['tel']}")
+                        else:
+                            st.error(f"❌ Échec de l'envoi à {user['tel']} - Code : {response.status_code}")
+            else:
+                st.info("📭 Aucune arrivée prévue demain.")
     except Exception as e:
-        st.error(f"❌ Erreur : {e}")
+        st.error(f"❌ Erreur lors du traitement du fichier : {e}")
+
 
 
 
