@@ -32,8 +32,8 @@ if csv_file is not None:
         df = pd.read_excel(csv_file)
 
         # Nettoyage des dates
-        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-        df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+        df["date_arrivee"] = pd.to_date(df["date_arrivee"], errors="coerce")
+        df["date_depart"] = pd.to_date(df["date_depart"], errors="coerce")
 
         # Colonnes requises
         required_cols = {
