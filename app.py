@@ -45,11 +45,3 @@ if csv_file is not None:
 
 else:
     st.info("Veuillez importer un fichier `.csv` pour continuer.")
-
-
-
-
-
-
-
-
