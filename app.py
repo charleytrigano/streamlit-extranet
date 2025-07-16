@@ -4,52 +4,43 @@ import datetime
 import requests
 import plotly.express as px
 
-# Configuration de la page
 st.set_page_config(page_title="📆 Extranet - Calendrier & SMS", layout="wide")
 
 st.title("📩 Envoi automatique de SMS aux clients")
 st.write("Importez un fichier `.csv` contenant les réservations à venir.")
 
-# Upload du fichier CSV
 csv_file = st.file_uploader("Importer un fichier CSV", type=["csv"])
 
 if csv_file is not None:
     try:
-        # Lire le fichier CSV avec le bon séparateur
         df = pd.read_csv(csv_file, sep=";")
 
-        # Nettoyage des dates
         df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
         df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
 
-        # Colonnes attendues
+        # Colonnes obligatoires et facultatives
         required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone"}
         optional_cols = {"prix_brut", "prix_net", "charges", "%"}
 
+        # Vérification colonnes obligatoires
         if not required_cols.issubset(df.columns):
-            st.error("❌ Le fichier doit contenir les colonnes : nom_client, date_arrivee, date_depart, plateforme, telephone")
+            st.error("❌ Le fichier doit contenir les colonnes obligatoires : nom_client, date_arrivee, date_depart, plateforme, telephone")
         else:
-            # Alerte si des colonnes optionnelles manquent
+            # Colonnes facultatives absentes
             missing_optional = optional_cols - set(df.columns)
             if missing_optional:
-                st.warning(f"⚠️ Colonnes optionnelles absentes : {', '.join(missing_optional)}")
+                st.warning(f"ℹ️ Colonnes facultatives absentes (ok si tu les ajoutes manuellement) : {', '.join(missing_optional)}")
 
             st.success("📋 Données chargées avec succès !")
-
-            # Affichage des données
             st.dataframe(df)
 
-            # ---------------------------
-            # PARTIE : ENVOI DE SMS FREE
-            # ---------------------------
+            # --------------------------- SMS AUTOMATIQUE ---------------------------
 
             st.markdown("---")
-            st.subheader("📱 Envoi de SMS pour les arrivées de demain")
+            st.subheader("📱 SMS pour les arrivées de demain")
 
-            # Calcul date de demain
             demain = datetime.date.today() + datetime.timedelta(days=1)
             demain_str = pd.to_datetime(demain).normalize()
-
             df_demain = df[df["date_arrivee"].dt.normalize() == demain_str]
 
             if df_demain.empty:
@@ -65,9 +56,7 @@ if csv_file is not None:
                         date_arrivee = row["date_arrivee"].strftime("%d/%m/%Y")
                         date_depart = row["date_depart"].strftime("%d/%m/%Y")
                         plateforme = row["plateforme"]
-                        numero_client = str(row["telephone"])
 
-                        # Message à envoyer
                         message = (
                             f"Bonjour {nom},\n"
                             f"Nous sommes heureux de vous accueillir demain à Nice.\n"
@@ -77,23 +66,14 @@ if csv_file is not None:
                             f"Annick & Charley"
                         )
 
-                        # Paramètres Free SMS
+                        # Destinataires Free
                         free_users = [
-                            {
-                                "user": "12026027",
-                                "key": "MF7Qjs3C8KxKHz"
-                            },
-                            {
-                                "user": "12026027",
-                                "key": "1Pat6vSRCLiSXl"
-                            }
+                            {"user": "12026027", "key": "MF7Qjs3C8KxKHz"},
+                            {"user": "12026027", "key": "1Pat6vSRCLiSXl"}
                         ]
 
                         for user_data in free_users:
-                            url = (
-                                f"https://smsapi.free-mobile.fr/sendmsg?user={user_data['user']}"
-                                f"&pass={user_data['key']}&msg={requests.utils.quote(message)}"
-                            )
+                            url = f"https://smsapi.free-mobile.fr/sendmsg?user={user_data['user']}&pass={user_data['key']}&msg={requests.utils.quote(message)}"
                             response = requests.get(url)
                             if response.status_code == 200:
                                 sms_logs.append(f"✅ SMS envoyé à {user_data['user']}")
@@ -102,9 +82,7 @@ if csv_file is not None:
 
                     st.text_area("📤 Résultat de l'envoi SMS", "\n".join(sms_logs), height=150)
 
-            # ---------------------------
-            # PARTIE : CALENDRIER PLOTLY
-            # ---------------------------
+            # --------------------------- CALENDRIER PLOTLY ---------------------------
 
             st.markdown("---")
             st.subheader("📅 Calendrier des réservations")
@@ -124,7 +102,8 @@ if csv_file is not None:
                 st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:
-        st.error(f"❌ Une erreur est survenue lors de la lecture du fichier : {str(e)}")
+        st.error(f"❌ Erreur lors de la lecture du fichier : {str(e)}")
+
 
 
 
