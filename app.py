@@ -3,12 +3,12 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 import plotly.figure_factory as ff
-import os
+import random
 
 st.set_page_config(page_title="Extranet Streamlit", layout="wide")
 
 # Navigation
-page = st.sidebar.radio("Navigation", ["📋 Réservations", "📅 Planning"])
+page = st.sidebar.radio("Navigation", ["📩 Réservations", "📅 Planning"])
 
 st.title("🏨 Portail Extranet Streamlit")
 
@@ -28,15 +28,14 @@ if uploaded_file is not None:
         if not required_cols.issubset(df.columns):
             st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(sorted(required_cols))}")
         else:
-            # Nettoyage des dates
+            # Nettoyage des colonnes
             df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
             df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
             df["nom_client"] = df["nom_client"].astype(str)
-            df["plateforme"] = df["plateforme"].astype(str)
+            df["plateforme"] = df["plateforme"].astype(str).str.strip()
 
-            if page == "📋 Réservations":
-                st.subheader("📩 Envoi automatique de SMS aux clients")
-                st.success("✅ Données chargées avec succès !")
+            if page == "📩 Réservations":
+                st.subheader("📤 Envoi automatique de SMS (Free Mobile)")
                 st.dataframe(df)
 
                 # SMS Free API config
@@ -48,65 +47,74 @@ if uploaded_file is not None:
                 FREE_API_KEY_2 = "MF7Qjs3C8KxKHz"
                 NUM_2 = "+33611772793"
 
-                # Envoi des SMS aux clients arrivant demain
+                # Envoi des SMS pour les arrivées de demain
                 demain = (datetime.now() + timedelta(days=1)).date()
                 df_demain = df[df["date_arrivee"].dt.date == demain]
 
                 if not df_demain.empty:
-                    st.subheader("📤 SMS envoyés (Free Mobile)")
                     for _, row in df_demain.iterrows():
                         nom = row["nom_client"]
-                        msg = (
+                        plateforme = row["plateforme"]
+                        date_dep = row["date_depart"].strftime("%d/%m/%Y")
+
+                        message = (
                             f"Bonjour {nom},\n"
-                            "Nous sommes heureux de vous accueillir demain à Nice.\n"
-                            "Un emplacement de parking est à votre disposition sur place.\n"
-                            "Merci de nous indiquer votre heure d'arrivée.\n"
-                            "Bon voyage et à demain !\n"
-                            "Annick & Charley"
+                            f"Nous sommes heureux de vous accueillir demain à Nice via {plateforme}.\n"
+                            f"Un parking est à votre disposition sur place.\n"
+                            f"Merci de nous indiquer votre heure d'arrivée.\n"
+                            f"Bon voyage et à demain !\n"
+                            f"Annick & Charley"
                         )
-                        # Envoi à NUM_1
-                        url1 = f"https://smsapi.free-mobile.fr/sendmsg?user={FREE_API_USER_1}&pass={FREE_API_KEY_1}&msg={requests.utils.quote(msg)}"
+
+                        url1 = f"https://smsapi.free-mobile.fr/sendmsg?user={FREE_API_USER_1}&pass={FREE_API_KEY_1}&msg={requests.utils.quote(message)}"
+                        url2 = f"https://smsapi.free-mobile.fr/sendmsg?user={FREE_API_USER_2}&pass={FREE_API_KEY_2}&msg={requests.utils.quote(message)}"
+
                         r1 = requests.get(url1)
+                        r2 = requests.get(url2)
+
                         if r1.status_code == 200:
                             st.success(f"✅ SMS envoyé à {nom} ({NUM_1})")
                         else:
-                            st.error(f"❌ Erreur pour {NUM_1}")
+                            st.error(f"❌ Erreur SMS vers {NUM_1}")
 
-                        # Envoi à NUM_2
-                        url2 = f"https://smsapi.free-mobile.fr/sendmsg?user={FREE_API_USER_2}&pass={FREE_API_KEY_2}&msg={requests.utils.quote(msg)}"
-                        r2 = requests.get(url2)
                         if r2.status_code == 200:
                             st.success(f"✅ SMS envoyé à {nom} ({NUM_2})")
                         else:
-                            st.error(f"❌ Erreur pour {NUM_2}")
+                            st.error(f"❌ Erreur SMS vers {NUM_2}")
                 else:
                     st.info("Aucune réservation prévue pour demain.")
 
             elif page == "📅 Planning":
-                st.subheader("📆 Calendrier des réservations")
+                st.subheader("📅 Calendrier des réservations (Gantt)")
 
-                # Créer les tâches Gantt
+                # Tâches pour Gantt
                 tasks = []
-                for _, row in df.iterrows():
-                    client = row["nom_client"]
-                    start = row["date_arrivee"]
-                    end = row["date_depart"]
-                    plate = row["plateforme"]
+                unique_platforms = df["plateforme"].unique()
 
-                    tasks.append(dict(
-                        Task=plate,
-                        Start=str(start.date()),
-                        Finish=str(end.date()),
-                        Resource=client
-                    ))
-
-                # Couleurs RGB
-                couleur_plateforme = {
+                # Générer une couleur aléatoire par plateforme si non définie
+                plateforme_colors = {}
+                base_colors = {
                     "Airbnb": "rgb(255,90,95)",
                     "Booking": "rgb(0,53,128)",
-                    "Abritel": "rgb(123,66,246)",
-                    "Autre": "rgb(0,191,255)"
+                    "Abritel": "rgb(123,66,246)"
                 }
+
+                for plat in unique_platforms:
+                    if plat in base_colors:
+                        plateforme_colors[plat] = base_colors[plat]
+                    else:
+                        r = random.randint(0, 255)
+                        g = random.randint(0, 255)
+                        b = random.randint(0, 255)
+                        plateforme_colors[plat] = f"rgb({r},{g},{b})"
+
+                for _, row in df.iterrows():
+                    tasks.append(dict(
+                        Task=row["plateforme"],
+                        Start=str(row["date_arrivee"].date()),
+                        Finish=str(row["date_depart"].date()),
+                        Resource=row["nom_client"]
+                    ))
 
                 try:
                     fig = ff.create_gantt(
@@ -118,19 +126,16 @@ if uploaded_file is not None:
                         showgrid_y=True,
                         bar_width=0.3,
                         height=600,
-                        colors=couleur_plateforme
+                        colors=plateforme_colors
                     )
-                    fig.update_layout(
-                        title="📅 Planning mensuel",
-                        margin=dict(l=20, r=20, t=40, b=20)
-                    )
+                    fig.update_layout(title="📆 Planning des réservations", margin=dict(l=20, r=20, t=40, b=20))
                     st.plotly_chart(fig, use_container_width=True)
                 except Exception as e:
                     st.error(f"Erreur lors de la génération du calendrier : {e}")
 
     except Exception as e:
-        st.error(f"❌ Erreur lors de la lecture du fichier : {e}")
+        st.error(f"❌ Erreur lors du traitement du fichier : {e}")
 else:
-    st.info("📤 Veuillez importer un fichier .xlsx dans la barre latérale.")
+    st.info("📤 Veuillez importer un fichier .xlsx à gauche.")
 
 
