@@ -2,20 +2,34 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import calendar
-from datetime import datetime
+from datetime import datetime, timedelta
+import requests
 
+# Configuration initiale
 st.set_page_config(layout="wide")
-st.title("📆 Calendrier des réservations")
+st.title("🏨 Gestion des Réservations Extranet")
 
-# ⬆️ Téléversement du fichier Excel
-uploaded_file = st.file_uploader("Importer votre fichier .xlsx", type="xlsx")
+# --- Paramètres SMS Free Mobile ---
+FREE_API_KEYS = {
+    "charley": {"user": "12026027", "key": "1Pat6vSRCLiSXl", "tel": "+33617722379"},
+    "annick": {"user": "12026027", "key": "MF7Qjs3C8KxKHz", "tel": "+33611772793"}
+}
 
-# ⬇️ Fonction pour dessiner le calendrier mensuel
+# --- Téléversement du fichier ---
+uploaded_file = st.file_uploader("📂 Importer votre fichier .xlsx", type="xlsx")
+
+# --- Fonction d'envoi de SMS ---
+def send_free_sms(user_id, api_key, message):
+    url = f"https://smsapi.free-mobile.fr/sendmsg?user={user_id}&pass={api_key}&msg={message}"
+    response = requests.get(url)
+    return response.status_code == 200
+
+# --- Fonction calendrier interactif ---
 def draw_calendar(df, mois, annee):
     jours = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
     nb_jours = calendar.monthrange(annee, mois)[1]
     cal = [[] for _ in range(6)]
-    start_day = (calendar.monthrange(annee, mois)[0] + 1) % 7  # Pour que lundi commence à 0
+    start_day = (calendar.monthrange(annee, mois)[0] + 1) % 7
 
     ligne = 0
     for i in range(start_day):
@@ -57,32 +71,52 @@ def draw_calendar(df, mois, annee):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-# 🔄 Navigation par mois et année
+# --- Traitement du fichier ---
 if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file)
-        required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone"}
+
+        # Vérification des colonnes
+        required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone",
+                         "prix_brut", "prix_net", "charges", "%"}
         if not required_cols.issubset(df.columns):
             st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(required_cols)}")
         else:
             df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
             df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
 
-            # Sélection du mois et de l’année
+            # 📋 Affichage du tableau
+            st.subheader("📋 Tableau des Réservations")
+            st.dataframe(df)
+
+            # 📩 Envoi de SMS aux clients arrivant demain
+            st.subheader("📩 Envoi de SMS")
+            demain = datetime.now() + timedelta(days=1)
+            df_demain = df[df["date_arrivee"] == demain.date()]
+
+            if not df_demain.empty:
+                for _, row in df_demain.iterrows():
+                    msg = f"Bonjour {row['nom_client']}, Nous sommes heureux de vous accueillir demain à Nice. " \
+                          f"Un emplacement de parking est à votre disposition. Merci de nous indiquer votre heure d’arrivée. " \
+                          f"Bon voyage ! Annick & Charley"
+                    sent_1 = send_free_sms(FREE_API_KEYS["charley"]["user"], FREE_API_KEYS["charley"]["key"], msg)
+                    sent_2 = send_free_sms(FREE_API_KEYS["annick"]["user"], FREE_API_KEYS["annick"]["key"], msg)
+
+                    st.write(f"📨 SMS envoyé à **{row['nom_client']}** : "
+                             f"{'✅' if sent_1 and sent_2 else '❌'}")
+
+            else:
+                st.info("Aucune arrivée prévue demain.")
+
+            # 📅 Calendrier visuel
+            st.subheader("📆 Calendrier Mensuel")
             col1, col2 = st.columns(2)
             with col1:
                 mois = st.selectbox("Mois", list(range(1, 13)), index=datetime.now().month - 1)
             with col2:
                 annee = st.selectbox("Année", list(range(2023, 2031)), index=1)
 
-            # Afficher le calendrier
             draw_calendar(df, mois, annee)
 
     except Exception as e:
         st.error(f"Erreur lors du traitement du fichier : {e}")
-
-
-
-
-
-
