@@ -1,164 +1,137 @@
 import streamlit as st
 import pandas as pd
-import calendar
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 import requests
+import calendar
 
-st.set_page_config(layout="wide", page_title="Portail Extranet Streamlit")
+st.set_page_config(page_title="Portail Extranet", layout="wide")
 
-st.title("🏨 Portail Extranet - Multi-services")
+# --------------------- CONFIGURATION SMS -----------------------
+FREE_API_KEY_1 = "MF7Qjs3C8KxKHz"
+FREE_USER_1 = "12026027"
 
-# Onglets
-onglet = st.sidebar.radio("Navigation", ["📋 Réservations & SMS", "📆 Calendrier mensuel"])
+FREE_API_KEY_2 = "1Pat6vSRCLiSXl"
+FREE_USER_2 = "12026027"
 
-# Lecture du fichier
-if "df" not in st.session_state:
-    st.session_state.df = None
+# --------------------- TITRE -----------------------
+st.title("🏨 Portail Extranet - Réservations")
 
-uploaded_file = st.file_uploader("Importer un fichier Excel (.xlsx)", type=["xlsx"])
+# --------------------- IMPORT FICHIER -----------------------
+st.subheader("📁 Importer un fichier .xlsx des réservations")
+uploaded_file = st.file_uploader("Importer un fichier Excel", type=["xlsx"])
+
+df = None
 if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file)
-        # Nettoyage
+
+        # Nettoyage et validation
         df.columns = df.columns.str.strip()
-        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-        df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
-
-        required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone",
-                         "prix_brut", "prix_net", "charges", "%"}
+        required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone", "prix_brut", "prix_net", "charges", "%"}
         if not required_cols.issubset(set(df.columns)):
-            st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(required_cols)}")
+            st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(sorted(required_cols))}")
+            df = None
         else:
-            st.session_state.df = df
+            df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+            df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+            st.success("✅ Fichier importé avec succès")
+            st.dataframe(df)
     except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier : {e}")
+        st.error(f"Erreur lors de l'importation : {e}")
 
-# Onglet 1 : Réservations et SMS
-if onglet == "📋 Réservations & SMS" and st.session_state.df is not None:
-    df = st.session_state.df
-    st.subheader("📄 Réservations à venir")
-    st.dataframe(df)
+# --------------------- ENVOI DE SMS -----------------------
+if df is not None:
+    st.subheader("📩 Envoi automatique de SMS (24h avant arrivée)")
+    aujourd_hui = datetime.today().date()
+    demain = aujourd_hui + timedelta(days=1)
 
-    # Envoi SMS aux clients arrivant demain
-    demain = (datetime.today() + timedelta(days=1)).date()
-    df_demain = df[df["date_arrivee"].dt.date == demain]
+    df_sms = df[df["date_arrivee"].dt.date == demain]
 
-    if not df_demain.empty:
-        st.subheader("📩 Envoi automatique de SMS pour demain")
+    if st.button("📲 Envoyer les SMS aux clients de demain"):
+        if df_sms.empty:
+            st.info("Aucun client attendu demain.")
+        else:
+            for _, row in df_sms.iterrows():
+                nom = row["nom_client"]
+                tel = row["telephone"]
+                arrivee = row["date_arrivee"].strftime("%d/%m/%Y")
+                depart = row["date_depart"].strftime("%d/%m/%Y")
+                plateforme = row["plateforme"]
 
-        for i, row in df_demain.iterrows():
-            nom = row["nom_client"]
-            date_arrivee = row["date_arrivee"].strftime("%d/%m/%Y")
-            date_depart = row["date_depart"].strftime("%d/%m/%Y")
-            plateforme = row["plateforme"]
-            tel = str(row["telephone"])
-            if tel.startswith("0"):
-                tel = "+33" + tel[1:]
-            elif tel.startswith("33"):
-                tel = "+" + tel
-            elif not tel.startswith("+"):
-                tel = "+33" + tel
+                message = (
+                    f"Reservation : {plateforme}\n"
+                    f"Client       : {nom}\n"
+                    f"Arrivee le   : {arrivee}\n"
+                    f"Depart le    : {depart}\n\n"
+                    f"Bonjour {nom}, nous sommes heureux de vous accueillir demain à Nice. "
+                    f"Un emplacement de parking est à votre disposition sur place. "
+                    f"Merci de nous indiquer votre heure d'arrivée approximative.\n"
+                    f"Bon voyage et à demain !\n"
+                    f"Annick & Charley"
+                )
 
-            message = f"Bonjour {nom},\n"
-            message += "Nous sommes heureux de vous accueillir demain à Nice.\n"
-            message += "Un emplacement de parking est à votre disposition.\n"
-            message += "Merci de nous indiquer votre heure d'arrivée.\n"
-            message += "Bon voyage et à demain !\nAnnick & Charley"
+                for user, key in [(FREE_USER_1, FREE_API_KEY_1), (FREE_USER_2, FREE_API_KEY_2)]:
+                    response = requests.get(
+                        "https://smsapi.free-mobile.fr/sendmsg",
+                        params={"user": user, "pass": key, "msg": message},
+                    )
+                    if response.status_code == 200:
+                        st.success(f"✅ SMS envoyé à {tel}")
+                    else:
+                        st.error(f"❌ Erreur d'envoi à {tel} — Code : {response.status_code}")
 
-            try:
-                user_id = "12026027"  # Remplace si besoin
-                api_key = "1Pat6vSRCLiSXl"
-                url = f"https://smsapi.free-mobile.fr/sendmsg?user={user_id}&pass={api_key}&msg={requests.utils.quote(message)}&to={tel}"
-                response = requests.get(url)
-                if response.status_code == 200:
-                    st.success(f"✅ SMS envoyé à {nom} ({tel})")
-                else:
-                    st.error(f"❌ Échec de l'envoi à {tel}")
-            except Exception as e:
-                st.error(f"❌ Erreur pour {tel} : {e}")
+# --------------------- CALENDRIER -----------------------
+if df is not None:
+    st.subheader("🗓️ Calendrier mensuel des réservations")
 
-# Onglet 2 : Calendrier mensuel
-if onglet == "📆 Calendrier mensuel" and st.session_state.df is not None:
-    df = st.session_state.df
-    st.subheader("📅 Calendrier mensuel des réservations")
+    mois = st.selectbox("Mois", list(calendar.month_name)[1:], index=datetime.today().month - 1)
+    annee = st.number_input("Année", value=datetime.today().year, step=1)
 
-    # Choix du mois
-    mois_actuel = st.session_state.get("mois_actuel", datetime.today().month)
-    annee_actuelle = st.session_state.get("annee_actuelle", datetime.today().year)
+    # Génération du calendrier
+    nb_jours = calendar.monthrange(annee, list(calendar.month_name).index(mois))[1]
+    jours = [datetime(annee, list(calendar.month_name).index(mois), j).date() for j in range(1, nb_jours + 1)]
 
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if st.button("⬅️ Mois précédent"):
-            if mois_actuel == 1:
-                mois_actuel = 12
-                annee_actuelle -= 1
-            else:
-                mois_actuel -= 1
-    with col3:
-        if st.button("➡️ Mois suivant"):
-            if mois_actuel == 12:
-                mois_actuel = 1
-                annee_actuelle += 1
-            else:
-                mois_actuel += 1
-
-    st.session_state.mois_actuel = mois_actuel
-    st.session_state.annee_actuelle = annee_actuelle
-
-    # Créer le calendrier
-    cal = calendar.Calendar(firstweekday=0)
-    jours = list(cal.itermonthdates(annee_actuelle, mois_actuel))
+    # Préparation des données
     data = {jour: [] for jour in jours}
-
     couleurs = {
-        "Booking": "#f39c12",
-        "Airbnb": "#e74c3c",
-        "Autre": "#3498db"
+        "Booking": "#3498db",
+        "Airbnb": "#e67e22",
+        "Autre": "#95a5a6"
     }
 
     for _, row in df.iterrows():
         nom = row["nom_client"]
         plate = row["plateforme"]
-        arrivee = row["date_arrivee"].date()
-        depart = row["date_depart"].date()
-        color = couleurs.get(plate, "#95a5a6")
-        jours_sejour = pd.date_range(arrivee, depart - timedelta(days=1)).date
+        arrivee = row["date_arrivee"]
+        depart = row["date_depart"]
 
-        for jour in jours:
-            if jour in jours_sejour:
-                data[jour].append((nom, plate, color))
+        if pd.isna(arrivee) or pd.isna(depart):
+            continue
 
-    # Affichage HTML
-    semaine_labels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
-    html = f"<h4>{calendar.month_name[mois_actuel]} {annee_actuelle}</h4>"
-    html += "<table style='width:100%; border-collapse:collapse;'>"
-    html += "<tr>" + "".join(f"<th style='border:1px solid #ccc; padding:5px'>{j}</th>" for j in semaine_labels) + "</tr>"
+        arrivee = arrivee.date()
+        depart = depart.date()
+        color = couleurs.get(plate, couleurs["Autre"])
 
-    semaine = []
+        try:
+            jours_sejour = pd.date_range(arrivee, depart - timedelta(days=1)).date
+            for jour in jours:
+                if jour in jours_sejour:
+                    data[jour].append((nom, plate, color))
+        except Exception as e:
+            st.warning(f"Erreur de date pour {nom}")
+
+    # Affichage
+    html_calendar = "<table style='width:100%; border-collapse:collapse;'>"
+    html_calendar += "<tr>" + "".join([f"<th>{j.strftime('%a %d')}</th>" for j in jours]) + "</tr>"
+    html_calendar += "<tr>"
+
     for jour in jours:
-        if jour.month != mois_actuel:
-            semaine.append("<td style='background:#eee; padding:8px'></td>")
-        else:
-            contenu = f"<div style='font-size:10px;'><strong>{jour.day}</strong><br>"
-            for nom, plate, color in data[jour]:
-                contenu += f"<div style='background:{color}; color:white; padding:2px; margin:1px;'>{nom}</div>"
-            contenu += "</div>"
-            semaine.append(f"<td style='border:1px solid #ccc; vertical-align:top'>{contenu}</td>")
+        html_calendar += "<td style='vertical-align:top; border:1px solid #ccc; padding:5px;'>"
+        for nom, plate, color in data[jour]:
+            html_calendar += f"<div style='background:{color}; padding:2px; margin-bottom:2px; color:white; font-size:12px;'>{nom}</div>"
+        html_calendar += "</td>"
+    html_calendar += "</tr></table>"
 
-        if len(semaine) == 7:
-            html += "<tr>" + "".join(semaine) + "</tr>"
-            semaine = []
-
-    if semaine:
-        while len(semaine) < 7:
-            semaine.append("<td></td>")
-        html += "<tr>" + "".join(semaine) + "</tr>"
-
-    html += "</table>"
-    st.markdown(html, unsafe_allow_html=True)
-
-# Footer
-st.markdown("---")
-st.caption("Développé avec ❤️ par [charleytrigano](https://github.com/charleytrigano)")
+    st.markdown(html_calendar, unsafe_allow_html=True)
 
 
