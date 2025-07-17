@@ -7,35 +7,35 @@ import os
 
 st.set_page_config(page_title="Extranet Streamlit", layout="wide")
 
-# Onglets
+# Navigation
 page = st.sidebar.radio("Navigation", ["📋 Réservations", "📅 Planning"])
 
 st.title("🏨 Portail Extranet Streamlit")
 
-if page == "📋 Réservations":
-    st.subheader("📩 Envoi automatique de SMS aux clients")
-    st.write("Importez un fichier **.xlsx** contenant les réservations à venir.")
-    csv_file = st.file_uploader("Importer un fichier Excel", type=["xlsx"])
+# Téléversement unique du fichier
+uploaded_file = st.sidebar.file_uploader("📂 Importer le fichier Excel", type=["xlsx"], key="main_upload")
 
-    if csv_file is not None:
-        try:
-            df = pd.read_excel(csv_file)
+if uploaded_file is not None:
+    try:
+        df = pd.read_excel(uploaded_file)
+        df.columns = df.columns.str.strip()
 
-            # Nettoyage des colonnes (espaces, accents)
-            df.columns = df.columns.str.strip()
+        required_cols = {
+            "nom_client", "date_arrivee", "date_depart", "plateforme",
+            "telephone", "prix_brut", "prix_net", "charges", "%"
+        }
 
-            required_cols = {
-                "nom_client", "date_arrivee", "date_depart",
-                "plateforme", "telephone", "prix_brut",
-                "prix_net", "charges", "%"
-            }
+        if not required_cols.issubset(df.columns):
+            st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(sorted(required_cols))}")
+        else:
+            # Nettoyage des dates
+            df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+            df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+            df["nom_client"] = df["nom_client"].astype(str)
+            df["plateforme"] = df["plateforme"].astype(str)
 
-            if not required_cols.issubset(set(df.columns)):
-                st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(sorted(required_cols))}")
-            else:
-                df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-                df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
-
+            if page == "📋 Réservations":
+                st.subheader("📩 Envoi automatique de SMS aux clients")
                 st.success("✅ Données chargées avec succès !")
                 st.dataframe(df)
 
@@ -79,43 +79,28 @@ if page == "📋 Réservations":
                             st.success(f"✅ SMS envoyé à {nom} ({NUM_2})")
                         else:
                             st.error(f"❌ Erreur pour {NUM_2}")
+                else:
+                    st.info("Aucune réservation prévue pour demain.")
 
-        except Exception as e:
-            st.error(f"Erreur : {str(e)}")
+            elif page == "📅 Planning":
+                st.subheader("📆 Calendrier des réservations")
 
-elif page == "📅 Planning":
-    st.subheader("🗓️ Calendrier des réservations")
-
-    csv_file = st.file_uploader("📂 Importer le fichier Excel", type=["xlsx"], key="calendar")
-    if csv_file is not None:
-        try:
-            df = pd.read_excel(csv_file)
-            df.columns = df.columns.str.strip()
-
-            # Check colonnes requises
-            required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme"}
-            if not required_cols.issubset(df.columns):
-                st.error("❌ Le fichier doit contenir les colonnes : nom_client, date_arrivee, date_depart, plateforme")
-            else:
-                df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-                df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
-
-                # Créer tâches pour le Gantt
+                # Créer les tâches Gantt
                 tasks = []
                 for _, row in df.iterrows():
                     client = row["nom_client"]
                     start = row["date_arrivee"]
                     end = row["date_depart"]
-                    label = row["plateforme"]
+                    plate = row["plateforme"]
 
                     tasks.append(dict(
-                        Task=label,
+                        Task=plate,
                         Start=str(start.date()),
                         Finish=str(end.date()),
                         Resource=client
                     ))
 
-                # Couleurs RGB par plateforme
+                # Couleurs RGB
                 couleur_plateforme = {
                     "Airbnb": "rgb(255,90,95)",
                     "Booking": "rgb(0,53,128)",
@@ -123,25 +108,29 @@ elif page == "📅 Planning":
                     "Autre": "rgb(0,191,255)"
                 }
 
-                fig = ff.create_gantt(
-                    tasks,
-                    index_col="Task",
-                    show_colorbar=True,
-                    group_tasks=True,
-                    showgrid_x=True,
-                    showgrid_y=True,
-                    bar_width=0.3,
-                    height=600,
-                    colors=couleur_plateforme
-                )
+                try:
+                    fig = ff.create_gantt(
+                        tasks,
+                        index_col="Task",
+                        show_colorbar=True,
+                        group_tasks=True,
+                        showgrid_x=True,
+                        showgrid_y=True,
+                        bar_width=0.3,
+                        height=600,
+                        colors=couleur_plateforme
+                    )
+                    fig.update_layout(
+                        title="📅 Planning mensuel",
+                        margin=dict(l=20, r=20, t=40, b=20)
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Erreur lors de la génération du calendrier : {e}")
 
-                fig.update_layout(
-                    title="📆 Planning mensuel",
-                    margin=dict(l=20, r=20, t=40, b=20)
-                )
+    except Exception as e:
+        st.error(f"❌ Erreur lors de la lecture du fichier : {e}")
+else:
+    st.info("📤 Veuillez importer un fichier .xlsx dans la barre latérale.")
 
-                st.plotly_chart(fig, use_container_width=True)
-
-        except Exception as e:
-            st.error(f"Erreur lors de la génération du calendrier : {e}")
 
