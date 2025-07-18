@@ -1,163 +1,123 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import calendar
 from datetime import datetime, timedelta
 import requests
 import os
 
-st.set_page_config(page_title="Extranet Réservations", layout="wide")
+st.set_page_config(page_title="Portail Extranet", layout="wide")
+st.title("📆 Portail Extranet - Calendrier & SMS")
 
-# ------------------------- CONFIGURATION SMS -------------------------
-FREE_API_KEYS = {
-    "+33617722379": "MF7Qjs3C8KxKHz",      # Numéro 1
-    "+33611772793": "1Pat6vSRCLiSXl",      # Numéro 2
-}
-FREE_USER = "12026027"
+# Charger le fichier existant
+EXCEL_FILE = "reservations.xlsx"
 
-# ------------------------- CHARGEMENT DU FICHIER -------------------------
-st.sidebar.title("📁 Import des données")
-fichier_excel = st.sidebar.file_uploader("Importer le fichier .xlsx", type=["xlsx"])
+def load_data():
+    try:
+        df = pd.read_excel(EXCEL_FILE)
+        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+        df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+        return df
+    except Exception as e:
+        st.error(f"Erreur lors du chargement du fichier : {e}")
+        return pd.DataFrame()
 
-if fichier_excel:
-    df = pd.read_excel(fichier_excel)
+def save_data(df):
+    try:
+        df.to_excel(EXCEL_FILE, index=False)
+        st.success("✅ Réservation ajoutée et sauvegardée.")
+    except Exception as e:
+        st.error(f"Erreur lors de la sauvegarde : {e}")
 
-    # Vérification des colonnes attendues
-    colonnes_attendues = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone",
-                          "prix_brut", "prix_net", "charges", "%"}
-    if not colonnes_attendues.issubset(set(df.columns)):
-        st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(colonnes_attendues)}")
-        st.stop()
+df = load_data()
 
-    # Nettoyage dates
-    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-    df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+# ⏱️ AJOUT D’UNE RÉSERVATION
+st.sidebar.header("➕ Ajouter une réservation")
+with st.sidebar.form("add_form"):
+    nom_client = st.text_input("Nom du client")
+    date_arrivee = st.date_input("Date d'arrivée")
+    date_depart = st.date_input("Date de départ")
+    plateforme = st.selectbox("Plateforme", ["Airbnb", "Booking", "Autre"])
+    telephone = st.text_input("Téléphone (format : +336...)", max_chars=20)
+    prix_brut = st.text_input("Prix brut (€)")
+    prix_net = st.text_input("Prix net (€)")
+    charges = st.text_input("Charges (€)")
+    pourcentage = st.text_input("Commission (%)")
+    submitted = st.form_submit_button("📥 Enregistrer")
 
-    st.success("✅ Données chargées avec succès")
+    if submitted:
+        new_row = pd.DataFrame([{
+            "nom_client": nom_client,
+            "date_arrivee": pd.to_datetime(date_arrivee),
+            "date_depart": pd.to_datetime(date_depart),
+            "plateforme": plateforme,
+            "telephone": telephone,
+            "prix_brut": prix_brut,
+            "prix_net": prix_net,
+            "charges": charges,
+            "%": pourcentage
+        }])
+        df = pd.concat([df, new_row], ignore_index=True)
+        save_data(df)
 
-    onglet = st.selectbox("🧭 Choisir une vue :", ["📋 Tableau", "🗓️ Calendrier", "➕ Nouvelle Réservation"])
+# 📊 AFFICHAGE CALENDRIER TYPE GANTT
+st.subheader("📅 Calendrier des réservations (vue Gantt)")
+try:
+    df_cal = df.dropna(subset=["date_arrivee", "date_depart", "nom_client"])
+    df_cal["Durée"] = (df_cal["date_depart"] - df_cal["date_arrivee"]).dt.days
+    fig = px.timeline(
+        df_cal,
+        x_start="date_arrivee",
+        x_end="date_depart",
+        y="nom_client",
+        color="plateforme",
+        title="Planning des séjours",
+        hover_data=["plateforme", "prix_net"]
+    )
+    fig.update_yaxes(autorange="reversed")
+    st.plotly_chart(fig, use_container_width=True)
+except Exception as e:
+    st.error(f"Erreur lors de l'affichage du calendrier : {e}")
 
-    # ------------------------- ONGLET TABLEAU -------------------------
-    if onglet == "📋 Tableau":
-        st.subheader("📋 Réservations")
-        st.dataframe(df)
+# 📤 ENVOI DE SMS (FREE MOBILE)
+st.subheader("📩 Journal d’envoi de SMS - clients arrivant demain")
+if "sms_log" not in st.session_state:
+    st.session_state.sms_log = []
 
-        # 📩 SMS automatique
-        demain = (datetime.today() + timedelta(days=1)).date()
-        df_demain = df[df["date_arrivee"].dt.date == demain]
+demain = datetime.now().date() + timedelta(days=1)
+df_sms = df[df["date_arrivee"].dt.date == demain]
 
-        if not df_demain.empty:
-            st.subheader("📩 Envoi des SMS clients pour demain")
+FREE_NUMEROS = [
+    {"user": "12026027", "key": "1Pat6vSRCLiSXl"},
+    {"user": "12026027", "key": "MF7Qjs3C8KxKHz"},
+]
 
-            for _, row in df_demain.iterrows():
-                msg = (
-                    f"Bonjour {row['nom_client']},\n\n"
-                    "Nous sommes heureux de vous accueillir demain à Nice.\n"
-                    "Un emplacement de parking est à votre disposition sur place.\n"
-                    "Merci de nous indiquer votre heure approximative d'arrivée.\n"
-                    "Bon voyage et à demain !\n"
-                    "Annick & Charley"
-                )
+for _, row in df_sms.iterrows():
+    nom = row["nom_client"]
+    date_arr = row["date_arrivee"].strftime("%d/%m/%Y")
+    date_dep = row["date_depart"].strftime("%d/%m/%Y")
+    message = (
+        f"Bonjour {nom},\n"
+        "Nous sommes heureux de vous accueillir demain à Nice.\n"
+        "Un emplacement de parking est à votre disposition sur place.\n"
+        "Merci de nous indiquer votre heure d'arrivée approximative.\n"
+        "Bon voyage et à demain !\nAnnick & Charley"
+    )
 
-                for numero, key in FREE_API_KEYS.items():
-                    payload = {
-                        "user": FREE_USER,
-                        "pass": key,
-                        "msg": msg
-                    }
-                    try:
-                        r = requests.get("https://smsapi.free-mobile.fr/sendmsg", params=payload)
-                        if r.status_code == 200:
-                            st.success(f"✅ SMS envoyé à {numero}")
-                        else:
-                            st.error(f"❌ Erreur pour {numero} : {r.text}")
-                    except Exception as e:
-                        st.error(f"❌ Exception pour {numero} : {e}")
+    for dest in FREE_NUMEROS:
+        url = f"https://smsapi.free-mobile.fr/sendmsg?user={dest['user']}&pass={dest['key']}&msg={requests.utils.quote(message)}"
+        try:
+            r = requests.get(url)
+            if r.status_code == 200:
+                st.session_state.sms_log.append(f"✅ SMS envoyé à {nom}")
+            else:
+                st.session_state.sms_log.append(f"❌ Échec SMS à {nom} - Code {r.status_code}")
+        except Exception as e:
+            st.session_state.sms_log.append(f"❌ Erreur pour {nom} : {e}")
 
-    # ------------------------- ONGLET CALENDRIER -------------------------
-    elif onglet == "🗓️ Calendrier":
-        st.subheader("🗓️ Calendrier des réservations (mensuel)")
+st.write("📋 Journal d’envoi de SMS :")
+for line in st.session_state.sms_log:
+    st.write(line)
 
-        df_cal = []
-        for _, row in df.iterrows():
-            arrivee = row["date_arrivee"]
-            depart = row["date_depart"]
-            if pd.notnull(arrivee) and pd.notnull(depart):
-                jours = pd.date_range(arrivee, depart - timedelta(days=0)).date
-                for jour in jours:
-                    df_cal.append({
-                        "date": jour,
-                        "client": row["nom_client"],
-                        "plateforme": row["plateforme"]
-                    })
-
-        if df_cal:
-            df_visu = pd.DataFrame(df_cal)
-            color_map = {
-                "Airbnb": "#FF5A5F",
-                "Booking": "#003580",
-                "Autre": "#00A699"
-            }
-
-            fig = px.timeline(
-                df_visu,
-                x_start="date",
-                x_end="date",
-                y="client",
-                color="plateforme",
-                color_discrete_map=color_map,
-                title="Planning des réservations",
-                labels={"client": "Nom du client"}
-            )
-            fig.update_layout(
-                xaxis=dict(title="Date", tickformat="%d %b"),
-                yaxis=dict(autorange="reversed"),
-                height=600
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Aucune réservation à afficher dans le calendrier.")
-
-    # ------------------------- ONGLET AJOUT -------------------------
-    elif onglet == "➕ Nouvelle Réservation":
-        st.subheader("➕ Ajouter une réservation")
-
-        with st.form("ajout_resa"):
-            nom = st.text_input("Nom du client")
-            arrivee = st.date_input("Date d’arrivée")
-            depart = st.date_input("Date de départ", min_value=arrivee + timedelta(days=1))
-            plateforme = st.selectbox("Plateforme", ["Airbnb", "Booking", "Autre"])
-            tel = st.text_input("Téléphone", placeholder="+336...")
-            brut = st.text_input("Prix brut (€)")
-            net = st.text_input("Prix net (€)")
-            charges = st.text_input("Charges (€)")
-            pourcent = st.text_input("%")
-
-            submitted = st.form_submit_button("💾 Enregistrer")
-
-            if submitted:
-                nouvelle_resa = {
-                    "nom_client": nom,
-                    "date_arrivee": pd.to_datetime(arrivee),
-                    "date_depart": pd.to_datetime(depart),
-                    "plateforme": plateforme,
-                    "telephone": tel,
-                    "prix_brut": brut,
-                    "prix_net": net,
-                    "charges": charges,
-                    "%": pourcent
-                }
-                df = pd.concat([df, pd.DataFrame([nouvelle_resa])], ignore_index=True)
-                st.success("✅ Réservation ajoutée (non sauvegardée).")
-
-                # Export automatique (optionnel)
-                df.to_excel("reservations_updated.xlsx", index=False)
-                st.info("💾 Nouvelle version enregistrée dans `reservations_updated.xlsx`")
-
-else:
-    st.warning("📂 Veuillez importer un fichier Excel (.xlsx) pour démarrer.")
-
-
-
-
-
+# 📌 AFFICHAGE DU TABLEAU DES RÉSERVATIONS
+st.subheader("📄 Tableau des réservations actuelles")
+st.dataframe(df, use_container_width=True)
