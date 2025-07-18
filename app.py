@@ -1,151 +1,173 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+import datetime
+import calendar
 import requests
-import plotly.express as px
-import os
+from io import BytesIO
 
-# ------------------ CONFIGURATION ------------------
-st.set_page_config(page_title="Extranet - Réservations", layout="wide")
-st.title("📅 Portail Extranet - Gestion des réservations")
+# Configuration Streamlit
+st.set_page_config(page_title="Portail Extranet", layout="wide")
 
-# Fichier Excel
-FICHIER_XLSX = "reservations.xlsx"
-
-# Configuration SMS Free Mobile
+# Constantes
 FREE_USER_1 = "12026027"
-FREE_KEY_1 = "1Pat6vSRCLiSXl"
+FREE_API_KEY_1 = "MF7Qjs3C8KxKHz"
 FREE_USER_2 = "12026027"
-FREE_KEY_2 = "1Pat6vSRCLiSXl"
+FREE_API_KEY_2 = "1Pat6vSRCLiSXl"
+NUMERO_ADMIN_1 = "+33617722379"
+NUMERO_ADMIN_2 = "+33611772793"
 
-def envoyer_sms(message):
-    erreurs = []
-    for user, key in [(FREE_USER_1, FREE_KEY_1), (FREE_USER_2, FREE_KEY_2)]:
-        url = f"https://smsapi.free-mobile.fr/sendmsg?user={user}&pass={key}&msg={message}"
-        try:
-            r = requests.get(url)
-            if r.status_code != 200:
-                erreurs.append(f"❌ Erreur pour {user} : {r.status_code}")
-        except Exception as e:
-            erreurs.append(f"❌ Exception pour {user} : {e}")
-    return erreurs
+PLATFORM_COLORS = {
+    "Airbnb": "#FF5A5F",
+    "Booking": "#003580",
+    "Autre": "#FFA500"
+}
 
-# ------------------ CHARGEMENT ------------------
-
-@st.cache_data
-def charger_donnees(path):
-    df = pd.read_excel(path)
-    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-    df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
-    return df
-
-# ------------------ AFFICHAGE DU TABLEAU ------------------
-
-def afficher_tableau(df):
-    st.subheader("📋 Tableau des réservations")
-    st.dataframe(df)
-
-# ------------------ CALENDRIER ------------------
-
-def afficher_calendrier(df):
-    st.subheader("📆 Calendrier mensuel")
-
+# Fonction : Envoi de SMS via Free Mobile
+def send_sms_free(user, key, msg):
+    url = f"https://smsapi.free-mobile.fr/sendmsg?user={user}&pass={key}&msg={msg}"
     try:
-        fig = px.timeline(
-            df,
-            x_start="date_arrivee",
-            x_end="date_depart",
-            y="nom_client",
-            color="plateforme",
-            title="Planning des séjours",
-            labels={"nom_client": "Client"},
-        )
-        fig.update_yaxes(autorange="reversed")
-        st.plotly_chart(fig, use_container_width=True)
+        response = requests.get(url)
+        return response.status_code == 200
     except Exception as e:
-        st.error(f"Erreur lors de la génération du calendrier : {e}")
+        return False
 
-# ------------------ SMS AUTOMATIQUE ------------------
+# Fonction : Générer le calendrier mensuel visuel
+def render_calendar(df, year, month):
+    cal = calendar.Calendar()
+    month_days = cal.itermonthdates(year, month)
+    weeks = []
+    for week in calendar.monthcalendar(year, month):
+        weeks.append(week)
 
-def sms_pour_demain(df):
-    demain = datetime.now().date() + timedelta(days=1)
-    df_demain = df[df["date_arrivee"].dt.date == demain]
+    plateforme_colors = PLATFORM_COLORS
+    data_by_date = {}
 
-    if df_demain.empty:
-        st.info("Aucun client n'arrive demain.")
-        return
+    for _, row in df.iterrows():
+        start = row["date_arrivee"].date()
+        end = row["date_depart"].date()
+        for single_date in pd.date_range(start, end - datetime.timedelta(days=1)):
+            data_by_date.setdefault(single_date.date(), []).append((row["nom_client"], row["plateforme"]))
 
-    st.subheader("📩 Envoi automatique de SMS")
+    # Affichage du calendrier
+    st.markdown(f"### 📅 Calendrier des réservations – {calendar.month_name[month]} {year}")
+    table = ""
+    table += "<table style='width:100%; border-collapse: collapse;'>"
+    table += "<tr>" + "".join(f"<th style='border: 1px solid #ccc; padding: 5px;'>{day}</th>" for day in ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]) + "</tr>"
 
-    for _, row in df_demain.iterrows():
-        msg = (
-            f"Bonjour {row['nom_client']},\n"
-            "Nous sommes heureux de vous accueillir demain à Nice.\n"
-            "Un emplacement de parking est à votre disposition sur place.\n"
-            "Merci de nous indiquer votre heure approximative d’arrivée.\n"
-            "Bon voyage et à demain !\n"
-            "Annick & Charley"
-        )
-        erreurs = envoyer_sms(msg)
-        if erreurs:
-            for e in erreurs:
-                st.error(e)
-        else:
-            st.success(f"📤 SMS envoyé pour {row['nom_client']}")
+    for week in weeks:
+        table += "<tr>"
+        for day in week:
+            if day == 0:
+                table += "<td style='border: 1px solid #ccc; padding: 10px; height: 80px;'></td>"
+                continue
 
-# ------------------ FORMULAIRE AJOUT ------------------
+            current_date = datetime.date(year, month, day)
+            if current_date in data_by_date:
+                cell_content = f"<strong>{day}</strong><br/>"
+                for nom, plateforme in data_by_date[current_date]:
+                    color = plateforme_colors.get(plateforme, "#ccc")
+                    cell_content += f"<div style='background-color:{color}; color:white; padding:2px; margin:2px; border-radius:4px; font-size:12px'>{nom}</div>"
+            else:
+                cell_content = f"<strong>{day}</strong><br/>"
 
-def ajouter_reservation(df):
-    st.subheader("➕ Ajouter une nouvelle réservation")
+            table += f"<td style='border: 1px solid #ccc; vertical-align: top; padding: 5px; height: 80px;'>{cell_content}</td>"
+        table += "</tr>"
+    table += "</table>"
+    st.markdown(table, unsafe_allow_html=True)
 
-    with st.form("ajouter_resa"):
-        nom = st.text_input("Nom du client")
-        date_arrivee = st.date_input("Date d'arrivée")
-        date_depart = st.date_input("Date de départ")
-        plateforme = st.selectbox("Plateforme", ["Booking", "Airbnb", "Autre"])
-        telephone = st.text_input("Téléphone")
-        prix_brut = st.text_input("Prix brut (€)")
-        prix_net = st.text_input("Prix net (€)")
-        charges = st.text_input("Charges (€)")
-        pourcentage = st.text_input("%")
+# Onglets
+tabs = st.tabs(["📋 Tableau des réservations", "🗓️ Calendrier", "➕ Nouvelle réservation"])
 
-        valider = st.form_submit_button("Valider")
-        if valider:
-            nouvelle_ligne = {
-                "nom_client": nom,
-                "date_arrivee": pd.to_datetime(date_arrivee),
-                "date_depart": pd.to_datetime(date_depart),
-                "plateforme": plateforme,
-                "telephone": telephone,
-                "prix_brut": prix_brut,
-                "prix_net": prix_net,
-                "charges": charges,
-                "%": pourcentage,
-            }
-            df = df._append(nouvelle_ligne, ignore_index=True)
-            df.to_excel(FICHIER_XLSX, index=False)
-            st.success("✅ Réservation ajoutée avec succès.")
-            st.rerun()
+# 1. Onglet Tableau des réservations
+with tabs[0]:
+    st.header("📋 Gestion des réservations")
+    uploaded_file = st.file_uploader("Importer un fichier .xlsx", type="xlsx")
 
-# ------------------ INTERFACE PRINCIPALE ------------------
-
-if not os.path.exists(FICHIER_XLSX):
-    st.warning("📂 Aucun fichier de réservation trouvé.")
-    uploaded_file = st.file_uploader("Importez un fichier .xlsx", type="xlsx")
     if uploaded_file:
-        with open(FICHIER_XLSX, "wb") as f:
-            f.write(uploaded_file.read())
-        st.success("Fichier importé. Rechargez la page.")
-else:
-    df = charger_donnees(FICHIER_XLSX)
+        try:
+            df = pd.read_excel(uploaded_file)
+            df.columns = df.columns.str.strip()
+            required_columns = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone", "prix_brut", "prix_net", "charges", "%"}
 
-    onglet = st.sidebar.radio("Navigation", ["Tableau", "Calendrier", "Ajouter", "SMS Demain"])
+            if not required_columns.issubset(set(df.columns)):
+                st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(required_columns)}")
+            else:
+                df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+                df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
 
-    if onglet == "Tableau":
-        afficher_tableau(df)
-    elif onglet == "Calendrier":
-        afficher_calendrier(df)
-    elif onglet == "Ajouter":
-        ajouter_reservation(df)
-    elif onglet == "SMS Demain":
-        sms_pour_demain(df)
+                st.success("✅ Données chargées avec succès.")
+                st.dataframe(df)
+
+                # SMS aux clients arrivant demain
+                demain = datetime.date.today() + datetime.timedelta(days=1)
+                df_demain = df[df["date_arrivee"].dt.date == demain]
+
+                for _, row in df_demain.iterrows():
+                    nom = row["nom_client"]
+                    msg = f"Bonjour {nom}, Nous sommes heureux de vous accueillir demain à Nice.\nUn parking est à votre disposition. Merci de nous indiquer votre heure d'arrivée.\nBon voyage et à demain !\nAnnick & Charley"
+                    num = row["telephone"]
+                    send_sms_free(FREE_USER_1, FREE_API_KEY_1, msg)
+                    send_sms_free(FREE_USER_2, FREE_API_KEY_2, msg)
+        except Exception as e:
+            st.error(f"Erreur lors du traitement du fichier : {e}")
+
+# 2. Onglet Calendrier
+with tabs[1]:
+    st.header("🗓️ Visualisation mensuelle")
+    if uploaded_file:
+        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+        df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+
+        today = datetime.date.today()
+        col1, col2 = st.columns(2)
+        with col1:
+            month = st.selectbox("Mois", range(1, 13), index=today.month - 1)
+        with col2:
+            year = st.selectbox("Année", range(today.year - 1, today.year + 2), index=1)
+
+        try:
+            render_calendar(df, year, month)
+        except Exception as e:
+            st.error(f"Erreur lors de la génération du calendrier : {e}")
+    else:
+        st.warning("📂 Veuillez importer un fichier pour afficher le calendrier.")
+
+# 3. Onglet Nouvelle Réservation
+with tabs[2]:
+    st.header("➕ Ajouter une nouvelle réservation")
+
+    with st.form("add_resa"):
+        nom_client = st.text_input("Nom du client")
+        date_arrivee = st.date_input("Date d'arrivée", min_value=datetime.date.today())
+        date_depart = st.date_input("Date de départ", min_value=date_arrivee + datetime.timedelta(days=1))
+        plateforme = st.selectbox("Plateforme", ["Airbnb", "Booking", "Autre"])
+        telephone = st.text_input("Téléphone")
+        prix_brut = st.text_input("Prix brut")
+        prix_net = st.text_input("Prix net")
+        charges = st.text_input("Charges")
+        pourcentage = st.text_input("%")
+        submit = st.form_submit_button("Ajouter")
+
+        if submit:
+            try:
+                new_row = pd.DataFrame([{
+                    "nom_client": nom_client,
+                    "date_arrivee": pd.to_datetime(date_arrivee),
+                    "date_depart": pd.to_datetime(date_depart),
+                    "plateforme": plateforme,
+                    "telephone": telephone,
+                    "prix_brut": prix_brut,
+                    "prix_net": prix_net,
+                    "charges": charges,
+                    "%": pourcentage
+                }])
+
+                df = pd.concat([df, new_row], ignore_index=True)
+                st.success("✅ Réservation ajoutée.")
+
+                towrite = BytesIO()
+                df.to_excel(towrite, index=False)
+                towrite.seek(0)
+                st.download_button("📥 Télécharger le fichier mis à jour", towrite, file_name="reservations_mise_a_jour.xlsx")
+            except Exception as e:
+                st.error(f"Erreur : {e}")
