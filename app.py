@@ -94,6 +94,7 @@ with tabs[0]:
             else:
                 df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
                 df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+                df = df.dropna(subset=["date_arrivee", "date_depart"])
 
                 st.success("✅ Données chargées avec succès.")
                 st.dataframe(df)
