@@ -1,174 +1,151 @@
 import streamlit as st
 import pandas as pd
-import datetime
 import calendar
+from datetime import datetime, timedelta, date
 import requests
 from io import BytesIO
 
-# Configuration Streamlit
-st.set_page_config(page_title="Portail Extranet", layout="wide")
+st.set_page_config(page_title="Extranet Réservations", layout="wide")
 
-# Constantes
-FREE_USER_1 = "12026027"
-FREE_API_KEY_1 = "MF7Qjs3C8KxKHz"
-FREE_USER_2 = "12026027"
-FREE_API_KEY_2 = "1Pat6vSRCLiSXl"
-NUMERO_ADMIN_1 = "+33617722379"
-NUMERO_ADMIN_2 = "+33611772793"
+st.title("📅 Portail Extranet Streamlit")
+st.markdown("**Bienvenue dans votre outil de gestion de réservations.**")
 
-PLATFORM_COLORS = {
-    "Airbnb": "#FF5A5F",
-    "Booking": "#003580",
-    "Autre": "#FFA500"
-}
+# --- Lecture du fichier .xlsx
+uploaded_file = st.file_uploader("Importer un fichier .xlsx", type=["xlsx"])
+df = pd.DataFrame()
 
-# Fonction : Envoi de SMS via Free Mobile
-def send_sms_free(user, key, msg):
-    url = f"https://smsapi.free-mobile.fr/sendmsg?user={user}&pass={key}&msg={msg}"
+if uploaded_file:
     try:
-        response = requests.get(url)
-        return response.status_code == 200
+        df = pd.read_excel(uploaded_file)
+
+        # Nettoyage des colonnes
+        required_cols = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone",
+                         "prix_brut", "prix_net", "charges", "%"}
+        if not required_cols.issubset(df.columns.str.strip()):
+            st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(required_cols)}")
+        else:
+            # Conversion des dates
+            df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+            df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+            df["plateforme"] = df["plateforme"].astype(str).str.strip()
+            df["nom_client"] = df["nom_client"].astype(str).str.strip()
+            st.success("✅ Fichier chargé avec succès.")
     except Exception as e:
-        return False
+        st.error(f"❌ Erreur lors de la lecture du fichier : {e}")
 
-# Fonction : Générer le calendrier mensuel visuel
-def render_calendar(df, year, month):
-    cal = calendar.Calendar()
-    month_days = cal.itermonthdates(year, month)
-    weeks = []
-    for week in calendar.monthcalendar(year, month):
-        weeks.append(week)
+# --- Envoi des SMS (Free Mobile)
+def envoyer_sms_free(user, api_key, message):
+    url = f"https://smsapi.free-mobile.fr/sendmsg?user={user}&pass={api_key}&msg={message}"
+    response = requests.get(url)
+    return response.status_code == 200
 
-    plateforme_colors = PLATFORM_COLORS
-    data_by_date = {}
+# --- SMS 24h avant l’arrivée
+if not df.empty:
+    aujourd_hui = pd.Timestamp(date.today())
+    demain = aujourd_hui + pd.Timedelta(days=1)
 
-    for _, row in df.iterrows():
-        start = row["date_arrivee"].date()
-        end = row["date_depart"].date()
-        for single_date in pd.date_range(start, end - datetime.timedelta(days=1)):
-            data_by_date.setdefault(single_date.date(), []).append((row["nom_client"], row["plateforme"]))
+    df_sms = df[df["date_arrivee"].dt.date == demain.date()]
 
-    # Affichage du calendrier
-    st.markdown(f"### 📅 Calendrier des réservations – {calendar.month_name[month]} {year}")
-    table = ""
-    table += "<table style='width:100%; border-collapse: collapse;'>"
-    table += "<tr>" + "".join(f"<th style='border: 1px solid #ccc; padding: 5px;'>{day}</th>" for day in ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]) + "</tr>"
+    st.subheader("📩 Envoi automatique de SMS (arrivées demain)")
 
-    for week in weeks:
-        table += "<tr>"
-        for day in week:
-            if day == 0:
-                table += "<td style='border: 1px solid #ccc; padding: 10px; height: 80px;'></td>"
-                continue
+    if not df_sms.empty:
+        for _, row in df_sms.iterrows():
+            nom = row["nom_client"]
+            message = f"""Bonjour {nom}, Nous sommes heureux de vous accueillir demain à Nice. 
+Un emplacement de parking est à votre disposition. Merci de nous indiquer votre heure d'arrivée. 
+Bon voyage et à demain ! Annick & Charley"""
 
-            current_date = datetime.date(year, month, day)
-            if current_date in data_by_date:
-                cell_content = f"<strong>{day}</strong><br/>"
-                for nom, plateforme in data_by_date[current_date]:
-                    color = plateforme_colors.get(plateforme, "#ccc")
-                    cell_content += f"<div style='background-color:{color}; color:white; padding:2px; margin:2px; border-radius:4px; font-size:12px'>{nom}</div>"
+            sent = envoyer_sms_free("12026027", "1Pat6vSRCLiSXl", message)
+            if sent:
+                st.success(f"✅ SMS envoyé à {nom}")
             else:
-                cell_content = f"<strong>{day}</strong><br/>"
-
-            table += f"<td style='border: 1px solid #ccc; vertical-align: top; padding: 5px; height: 80px;'>{cell_content}</td>"
-        table += "</tr>"
-    table += "</table>"
-    st.markdown(table, unsafe_allow_html=True)
-
-# Onglets
-tabs = st.tabs(["📋 Tableau des réservations", "🗓️ Calendrier", "➕ Nouvelle réservation"])
-
-# 1. Onglet Tableau des réservations
-with tabs[0]:
-    st.header("📋 Gestion des réservations")
-    uploaded_file = st.file_uploader("Importer un fichier .xlsx", type="xlsx")
-
-    if uploaded_file:
-        try:
-            df = pd.read_excel(uploaded_file)
-            df.columns = df.columns.str.strip()
-            required_columns = {"nom_client", "date_arrivee", "date_depart", "plateforme", "telephone", "prix_brut", "prix_net", "charges", "%"}
-
-            if not required_columns.issubset(set(df.columns)):
-                st.error(f"❌ Le fichier doit contenir les colonnes : {', '.join(required_columns)}")
-            else:
-                df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-                df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
-                df = df.dropna(subset=["date_arrivee", "date_depart"])
-
-                st.success("✅ Données chargées avec succès.")
-                st.dataframe(df)
-
-                # SMS aux clients arrivant demain
-                demain = datetime.date.today() + datetime.timedelta(days=1)
-                df_demain = df[df["date_arrivee"].dt.date == demain]
-
-                for _, row in df_demain.iterrows():
-                    nom = row["nom_client"]
-                    msg = f"Bonjour {nom}, Nous sommes heureux de vous accueillir demain à Nice.\nUn parking est à votre disposition. Merci de nous indiquer votre heure d'arrivée.\nBon voyage et à demain !\nAnnick & Charley"
-                    num = row["telephone"]
-                    send_sms_free(FREE_USER_1, FREE_API_KEY_1, msg)
-                    send_sms_free(FREE_USER_2, FREE_API_KEY_2, msg)
-        except Exception as e:
-            st.error(f"Erreur lors du traitement du fichier : {e}")
-
-# 2. Onglet Calendrier
-with tabs[1]:
-    st.header("🗓️ Visualisation mensuelle")
-    if uploaded_file:
-        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-        df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
-
-        today = datetime.date.today()
-        col1, col2 = st.columns(2)
-        with col1:
-            month = st.selectbox("Mois", range(1, 13), index=today.month - 1)
-        with col2:
-            year = st.selectbox("Année", range(today.year - 1, today.year + 2), index=1)
-
-        try:
-            render_calendar(df, year, month)
-        except Exception as e:
-            st.error(f"Erreur lors de la génération du calendrier : {e}")
+                st.error(f"❌ Échec de l'envoi du SMS à {nom}")
     else:
-        st.warning("📂 Veuillez importer un fichier pour afficher le calendrier.")
+        st.info("Aucun client n’arrive demain.")
 
-# 3. Onglet Nouvelle Réservation
-with tabs[2]:
-    st.header("➕ Ajouter une nouvelle réservation")
-
-    with st.form("add_resa"):
+# --- 🆕 Ajouter une réservation
+with st.form("ajouter_reservation"):
+    st.subheader("➕ Ajouter une réservation manuellement")
+    col1, col2 = st.columns(2)
+    with col1:
         nom_client = st.text_input("Nom du client")
-        date_arrivee = st.date_input("Date d'arrivée", min_value=datetime.date.today())
-        date_depart = st.date_input("Date de départ", min_value=date_arrivee + datetime.timedelta(days=1))
-        plateforme = st.selectbox("Plateforme", ["Airbnb", "Booking", "Autre"])
+        date_arrivee = st.date_input("Date d’arrivée")
+        date_depart = st.date_input("Date de départ")
+        plateforme = st.selectbox("Plateforme", ["Booking", "Airbnb"])
+    with col2:
         telephone = st.text_input("Téléphone")
         prix_brut = st.text_input("Prix brut")
         prix_net = st.text_input("Prix net")
         charges = st.text_input("Charges")
         pourcentage = st.text_input("%")
-        submit = st.form_submit_button("Ajouter")
 
-        if submit:
-            try:
-                new_row = pd.DataFrame([{
-                    "nom_client": nom_client,
-                    "date_arrivee": pd.to_datetime(date_arrivee),
-                    "date_depart": pd.to_datetime(date_depart),
-                    "plateforme": plateforme,
-                    "telephone": telephone,
-                    "prix_brut": prix_brut,
-                    "prix_net": prix_net,
-                    "charges": charges,
-                    "%": pourcentage
-                }])
+    submit = st.form_submit_button("✅ Ajouter")
 
-                df = pd.concat([df, new_row], ignore_index=True)
-                st.success("✅ Réservation ajoutée.")
+    if submit and nom_client:
+        nouvelle_reservation = {
+            "nom_client": nom_client,
+            "date_arrivee": pd.to_datetime(date_arrivee),
+            "date_depart": pd.to_datetime(date_depart),
+            "plateforme": plateforme,
+            "telephone": telephone,
+            "prix_brut": prix_brut,
+            "prix_net": prix_net,
+            "charges": charges,
+            "%": pourcentage
+        }
+        df = pd.concat([df, pd.DataFrame([nouvelle_reservation])], ignore_index=True)
+        st.success(f"Réservation ajoutée pour {nom_client} ✅")
 
-                towrite = BytesIO()
-                df.to_excel(towrite, index=False)
-                towrite.seek(0)
-                st.download_button("📥 Télécharger le fichier mis à jour", towrite, file_name="reservations_mise_a_jour.xlsx")
-            except Exception as e:
-                st.error(f"Erreur : {e}")
+# --- 🗓️ Calendrier mensuel
+if not df.empty:
+    st.subheader("📆 Calendrier des réservations")
+
+    today = date.today()
+    mois = st.selectbox("Mois", list(calendar.month_name)[1:], index=today.month - 1)
+    annee = st.number_input("Année", value=today.year, step=1)
+
+    mois_index = list(calendar.month_name).index(mois)
+
+    # Réservations du mois
+    start_month = date(annee, mois_index, 1)
+    end_month = start_month + pd.DateOffset(months=1) - pd.DateOffset(days=1)
+
+    cal = calendar.Calendar()
+    semaines = cal.monthdatescalendar(annee, mois_index)
+
+    couleurs = {"Booking": "#8ecae6", "Airbnb": "#f4a261"}
+
+    # Construction du calendrier HTML
+    html = '<style>td, th {border:1px solid gray; padding:8px; text-align:center;}</style>'
+    html += "<table><tr>" + "".join(f"<th>{day}</th>" for day in ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]) + "</tr>"
+
+    for semaine in semaines:
+        html += "<tr>"
+        for jour in semaine:
+            contenu = f"<strong>{jour.day}</strong>"
+            jour_reservations = df[
+                (df["date_arrivee"].dt.date <= jour) &
+                (df["date_depart"].dt.date > jour)
+            ]
+            for _, res in jour_reservations.iterrows():
+                couleur = couleurs.get(res["plateforme"], "#ccc")
+                contenu += f'<div style="background:{couleur}; padding:2px; margin-top:2px; font-size:12px;">{res["nom_client"]}</div>'
+            html += f"<td>{contenu}</td>"
+        html += "</tr>"
+    html += "</table>"
+    st.markdown(html, unsafe_allow_html=True)
+
+# --- 📥 Exportation
+if not df.empty:
+    def convert_to_excel(df):
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            df.to_excel(writer, index=False, sheet_name="Réservations")
+        return output.getvalue()
+
+    st.download_button(
+        label="💾 Télécharger les réservations",
+        data=convert_to_excel(df),
+        file_name="reservations.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
