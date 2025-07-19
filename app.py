@@ -24,7 +24,6 @@ FILE_PATH = "reservations.xlsx"
 def charger_donnees(path):
     return pd.read_excel(path)
 
-@st.cache_data
 def sauvegarder_donnees(df):
     df.to_excel(FILE_PATH, index=False)
 
@@ -55,31 +54,50 @@ else:
 # Onglet Réservations
 if onglet == "📋 Réservations":
     st.subheader("📋 Liste des réservations")
-    st.dataframe(df)
 
-    st.subheader("✏️ Modifier une réservation")
-    index = st.selectbox("Sélectionner une ligne à modifier", df.index)
+    # Filtres par colonne
+    filtres = {}
+    colonnes_filtrables = df.columns
+    for col in colonnes_filtrables:
+        valeurs_uniques = df[col].dropna().unique()
+        filtres[col] = st.multiselect(f"Filtrer {col}", options=valeurs_uniques, default=valeurs_uniques)
+
+    df_filtre = df.copy()
+    for col in filtres:
+        df_filtre = df_filtre[df_filtre[col].isin(filtres[col])]
+
+    st.dataframe(df_filtre)
+
+    st.subheader("✏️ Modifier / Supprimer une réservation")
+    index = st.selectbox("Sélectionner une ligne à modifier/supprimer", df.index)
     with st.form("modifier_resa"):
         col1, col2 = st.columns(2)
         with col1:
             nom = st.text_input("Nom", df.loc[index, "nom_client"])
             plateforme = st.selectbox("Plateforme", ["Airbnb", "Booking"], index=0 if df.loc[index, "plateforme"] == "Airbnb" else 1)
-            date_arrivee = st.date_input("Date d'arrivée", df.loc[index, "date_arrivee"])
+            date_arrivee = st.date_input("Date d'arrivée", pd.to_datetime(df.loc[index, "date_arrivee"]).date())
         with col2:
-            date_depart = st.date_input("Date de départ", df.loc[index, "date_depart"])
+            date_depart = st.date_input("Date de départ", pd.to_datetime(df.loc[index, "date_depart"]).date())
             tel = st.text_input("Téléphone", df.loc[index, "telephone"])
         
-        brut = st.text_input("Prix brut", df.loc[index, "prix_brut"])
-        net = st.text_input("Prix net", df.loc[index, "prix_net"])
-        charges = st.text_input("Charges", df.loc[index, "charges"])
-        pourcent = st.text_input("%", df.loc[index, "%"])
+        brut = st.text_input("Prix brut", str(df.loc[index, "prix_brut"]))
+        net = st.text_input("Prix net", str(df.loc[index, "prix_net"]))
+        charges = st.text_input("Charges", str(df.loc[index, "charges"]))
+        pourcent = st.text_input("%", str(df.loc[index, "%"]))
 
-        modif = st.form_submit_button("💾 Enregistrer les modifications")
+        col_modif, col_suppr = st.columns([1, 1])
+        modif = col_modif.form_submit_button("💾 Enregistrer")
+        suppr = col_suppr.form_submit_button("🗑️ Supprimer")
 
     if modif:
         df.loc[index] = [nom, date_arrivee, date_depart, plateforme, tel, brut, net, charges, pourcent]
         sauvegarder_donnees(df)
         st.success("Modification enregistrée ✅")
+
+    if suppr:
+        df = df.drop(index).reset_index(drop=True)
+        sauvegarder_donnees(df)
+        st.warning("Réservation supprimée ❌")
 
 # Onglet Nouvelle réservation
 elif onglet == "➕ Nouvelle réservation":
@@ -124,8 +142,12 @@ elif onglet == "➕ Nouvelle réservation":
 # Onglet Calendrier
 elif onglet == "📆 Calendrier":
     st.subheader("📅 Calendrier mensuel")
-    mois = st.selectbox("Mois", list(range(1, 13)), index=date.today().month - 1)
-    annee = st.selectbox("Année", list(range(date.today().year - 1, date.today().year + 2)), index=1)
+
+    col_mois, col_annee = st.columns([1, 1])
+    with col_mois:
+        mois = st.selectbox("Mois", list(range(1, 13)), index=date.today().month - 1)
+    with col_annee:
+        annee = st.selectbox("Année", list(range(date.today().year - 1, date.today().year + 2)), index=1)
 
     cal = calendar.Calendar()
     mois_affiche = cal.monthdatescalendar(annee, mois)
@@ -150,7 +172,6 @@ elif onglet == "📆 Calendrier":
         except Exception as e:
             st.error(f"Erreur dans le calendrier : {e}")
 
-    # Affichage tableau calendrier
     st.write(f"## {calendar.month_name[mois]} {annee}")
     table = pd.DataFrame(index=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"])
 
