@@ -14,6 +14,12 @@ def charger_donnees():
         df = pd.read_excel(FICHIER_RESERVATIONS)
         df["date_arrivee"] = pd.to_datetime(df["date_arrivee"])
         df["date_depart"] = pd.to_datetime(df["date_depart"])
+        if "charges" not in df.columns:
+            df["charges"] = df["prix_brut"] - df["prix_net"]
+        if "%" not in df.columns:
+            df["%"] = (df["charges"] / df["prix_brut"]) * 100
+        if "nuitees" not in df.columns:
+            df["nuitees"] = (df["date_depart"] - df["date_arrivee"]).dt.days
         return df
     return pd.DataFrame(columns=[
         "nom_client", "date_arrivee", "date_depart", "plateforme", "telephone",
@@ -75,6 +81,10 @@ def afficher_reservations(df):
     st.dataframe(df, use_container_width=True)
 
     st.subheader("🛠️ Modifier ou supprimer une réservation")
+    if df.empty:
+        st.info("Aucune réservation à modifier.")
+        return df
+
     selection = st.selectbox("Choisir une réservation à modifier", df["nom_client"] + " - " + df["date_arrivee"].dt.strftime("%Y-%m-%d"))
 
     selected_index = df[df["nom_client"] + " - " + df["date_arrivee"].dt.strftime("%Y-%m-%d") == selection].index[0]
@@ -135,6 +145,10 @@ def envoyer_sms_jour(df):
 
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
+    if not {"prix_brut", "prix_net", "charges", "nuitees"}.issubset(df.columns):
+        st.warning("Colonnes manquantes dans le fichier.")
+        return
+
     df["annee"] = df["date_arrivee"].dt.year
     df["mois"] = df["date_arrivee"].dt.month
 
@@ -150,8 +164,32 @@ def rapport_mensuel(df):
 
     st.dataframe(regroupement)
 
+def afficher_calendrier(df):
+    st.subheader("📅 Calendrier de réservations (type Airbnb/Booking)")
+
+    mois_courant = datetime.date.today().month
+    annee_courante = datetime.date.today().year
+    nom_mois = calendar.month_name[mois_courant]
+
+    st.markdown(f"### {nom_mois} {annee_courante}")
+    mois_dates = pd.date_range(start=datetime.date(annee_courante, mois_courant, 1),
+                               end=datetime.date(annee_courante, mois_courant, calendar.monthrange(annee_courante, mois_courant)[1]))
+    calendrier = pd.DataFrame(index=mois_dates)
+
+    def afficher_cellule(jour):
+        lignes = []
+        for _, row in df.iterrows():
+            if row["date_arrivee"].date() <= jour.date() < row["date_depart"].date():
+                lignes.append(f"{row['nom_client']} ({row['plateforme']})")
+        return "\n".join(lignes)
+
+    calendrier["Réservations"] = calendrier.index.to_series().apply(afficher_cellule)
+    calendrier.reset_index(inplace=True)
+    calendrier.rename(columns={"index": "Date"}, inplace=True)
+    st.dataframe(calendrier, height=600, use_container_width=True)
+
 # Interface principale
-st.title("🏨 Portail Extranet Streamlit")
+st.title("🏨 Portail Extranet")
 
 onglet = st.sidebar.radio("Navigation", ["📥 Réservations", "📅 Calendrier", "📈 Rapport"])
 
@@ -162,9 +200,8 @@ if onglet == "📥 Réservations":
     df = afficher_reservations(df)
     envoyer_sms_jour(df)
 
+elif onglet == "📅 Calendrier":
+    afficher_calendrier(df)
+
 elif onglet == "📈 Rapport":
     rapport_mensuel(df)
-
-elif onglet == "📅 Calendrier":
-    st.markdown("⏳ Le calendrier sera intégré ici sous forme visuelle avec plateforme par couleur. (À venir dans le prochain bloc.)")
-
