@@ -126,7 +126,9 @@ def ajouter_reservation(df):
 # ✏️ Modifier / supprimer
 def modifier_reservation(df):
     st.subheader("✏️ Modifier ou Supprimer une Réservation")
-    df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime("%Y-%m-%d")
+    df = df[df["date_arrivee"].notna()]
+df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime("%Y-%m-%d")
+
     choix = st.selectbox("Choisissez une réservation", df["identifiant"])
     selection = df[df["identifiant"] == choix].index[0]
 
