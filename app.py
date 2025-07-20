@@ -18,8 +18,8 @@ FREE_API_CREDENTIALS = [
 
 def charger_donnees():
     df = pd.read_excel(FICHIER_EXCEL)
-    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"])
-    df["date_depart"] = pd.to_datetime(df["date_depart"])
+    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+    df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
     df["nuitees"] = (df["date_depart"] - df["date_arrivee"]).dt.days
     df["charges"] = df["prix_brut"] - df["prix_net"]
     df["%"] = (df["charges"] / df["prix_brut"] * 100).round(2)
