@@ -4,3 +4,4 @@ openpyxl  # pour lire les fichiers .xlsx
 python-dotenv  # si tu charges des variables via .env
 
 
+
