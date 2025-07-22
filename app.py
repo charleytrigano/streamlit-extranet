@@ -1,10 +1,12 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
 import calendar
 from datetime import datetime, timedelta, date
 import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 FICHIER = "reservations.xlsx"
 
@@ -23,12 +25,20 @@ def charger_donnees():
     df["mois"] = df["date_arrivee"].dt.month
     return df
 
-# 📩 SMS automatique
+# 📩 SMS automatique aux clients + copie aux hôtes
 def envoyer_sms_jour(df):
     demain = date.today() + timedelta(days=1)
-    if "telephone" not in df.columns or df["telephone"].isnull().all():
+
+    user_id = os.getenv("FREE_USER")
+    api_key = os.getenv("FREE_API_KEY")
+    numeros_hotes = os.getenv("NUMERO_DESTINATAIRE", "").split(",")
+
+    if not user_id or not api_key or not numeros_hotes:
+        print("❌ Paramètres Free Mobile manquants")
         return
+
     df_sms = df[df["date_arrivee"].dt.date == demain]
+
     for _, row in df_sms.iterrows():
         message = (
             f"Bonjour {row['nom_client']},\n"
@@ -38,12 +48,23 @@ def envoyer_sms_jour(df):
             "Bon voyage et à demain !\n"
             "Annick & Charley"
         )
-        try:
-            requests.get(
-                f"https://smsapi.free-mobile.fr/sendmsg?user=12026027&pass=1Pat6vSRCLiSXl&msg={message}"
-            )
-        except:
-            pass
+
+        # 1. Envoi au client
+        if pd.notna(row.get("telephone")):
+            try:
+                url = f"https://smsapi.free-mobile.fr/sendmsg?user={user_id}&pass={api_key}&msg={message}"
+                requests.get(url)
+            except Exception as e:
+                print(f"Erreur envoi SMS client : {e}")
+
+        # 2. Copie aux hôtes
+        for num in numeros_hotes:
+            try:
+                copie = f"[COPIE SMS pour {row['nom_client']}] " + message
+                url = f"https://smsapi.free-mobile.fr/sendmsg?user={user_id}&pass={api_key}&msg={copie}"
+                requests.get(url)
+            except Exception as e:
+                print(f"Erreur envoi copie : {e}")
 
 # 📅 Calendrier mensuel
 def afficher_calendrier(df):
@@ -181,7 +202,7 @@ def rapport_mensuel(df):
     else:
         st.info("Aucune donnée disponible")
 
-# 🚀 Lancement de l'app
+# 🚀 Lancement
 if __name__ == "__main__":
     df = charger_donnees()
     envoyer_sms_jour(df)
