@@ -38,7 +38,8 @@ def envoyer_sms_jour(df):
         return
 
     df_sms = df[df["date_arrivee"].dt.date == demain]
-
+    st.write(df[df["date_arrivee"].dt.date == date.today() + timedelta(days=1)])
+    
     for _, row in df_sms.iterrows():
         message = (
             f"Bonjour {row['nom_client']},\n"
