@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import date, timedelta
+from datetime import datetime, timedelta, date
 import os
 
 FICHIER = "reservations.xlsx"
@@ -156,7 +156,6 @@ def rapport_mensuel(df):
         "nuitees": "{:.0f}"
     }))
 
-    # Totaux annuels
     st.subheader("📈 Totaux annuels par plateforme")
     totaux = df_annee.groupby("plateforme").agg(
         total_brut=("prix_brut", "sum"),
@@ -173,35 +172,45 @@ def rapport_mensuel(df):
         "prix_moyen_brut": "€{:.2f}", "prix_moyen_net": "€{:.2f}"
     }))
 
-    # Bouton Excel
+    st.subheader("📊 Total général annuel toutes plateformes")
+    total_global = {
+        "total_brut": df_annee["prix_brut"].sum(),
+        "total_net": df_annee["prix_net"].sum(),
+        "total_charges": df_annee["charges"].sum(),
+        "total_nuitees": df_annee["nuitees"].sum(),
+    }
+    total_global["prix_moyen_brut"] = total_global["total_brut"] / total_global["total_nuitees"] if total_global["total_nuitees"] else 0
+    total_global["prix_moyen_net"] = total_global["total_net"] / total_global["total_nuitees"] if total_global["total_nuitees"] else 0
+
+    df_total_global = pd.DataFrame([total_global])
+    st.dataframe(df_total_global.style.format({
+        "total_brut": "€{:.2f}", "total_net": "€{:.2f}",
+        "total_charges": "€{:.2f}", "total_nuitees": "{:.0f}",
+        "prix_moyen_brut": "€{:.2f}", "prix_moyen_net": "€{:.2f}"
+    }))
+
     st.subheader("⬇️ Exporter rapport Excel")
     if st.button("Télécharger rapport Excel"):
         nom_fichier = f"rapport_{annee}.xlsx"
         with pd.ExcelWriter(nom_fichier) as writer:
             grouped.to_excel(writer, sheet_name="Mensuel", index=False)
             totaux.to_excel(writer, sheet_name="Annuel", index=False)
+            df_total_global.to_excel(writer, sheet_name="Total Général", index=False)
         with open(nom_fichier, "rb") as f:
             st.download_button("📥 Télécharger Excel", f, file_name=nom_fichier)
 
-# Lancement
+# 🚀 App
 if __name__ == "__main__":
     df = charger_donnees()
-    onglet = st.sidebar.radio("Navigation", [
-        "📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"
-    ])
-
+    onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
     if onglet == "📋 Réservations":
         st.title("📋 Tableau des réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
-
     elif onglet == "➕ Ajouter":
         df = ajouter_reservation(df)
-
     elif onglet == "✏️ Modifier / Supprimer":
         df = modifier_reservation(df)
-
     elif onglet == "📅 Calendrier":
         afficher_calendrier(df)
-
     elif onglet == "📊 Rapport":
         rapport_mensuel(df)
