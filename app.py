@@ -1,33 +1,43 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import datetime, timedelta, date
 import os
+import shutil
+from datetime import datetime, timedelta, date
+from io import BytesIO
 
 FICHIER = "reservations.xlsx"
+DOSSIER_BACKUP = "backups"
 
-# 📦 Chargement des données
+# 📦 Chargement et sauvegarde automatique
 def charger_donnees():
-    if not os.path.exists(FICHIER):
-        return pd.DataFrame(columns=[
-            "nom_client", "plateforme", "telephone",
-            "date_arrivee", "date_depart", "prix_brut", "prix_net",
-            "charges", "%", "nuitees", "annee", "mois"
-        ])
-    df = pd.read_excel(FICHIER)
-    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
-    df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
-    df = df[df["date_arrivee"].notna() & df["date_depart"].notna()]
-    df["prix_brut"] = pd.to_numeric(df["prix_brut"], errors="coerce")
-    df["prix_net"] = pd.to_numeric(df["prix_net"], errors="coerce")
-    df["charges"] = df["prix_brut"] - df["prix_net"]
-    df["%"] = (df["charges"] / df["prix_brut"] * 100).round(2)
-    df["nuitees"] = (df["date_depart"] - df["date_arrivee"]).dt.days
-    df["annee"] = df["date_arrivee"].dt.year
-    df["mois"] = df["date_arrivee"].dt.month
-    return df
+    if not os.path.exists(DOSSIER_BACKUP):
+        os.makedirs(DOSSIER_BACKUP)
 
-# ➕ Ajouter réservation
+    if os.path.exists(FICHIER):
+        nom_backup = os.path.join(DOSSIER_BACKUP, f"backup_{datetime.now().date()}.xlsx")
+        if not os.path.exists(nom_backup):
+            shutil.copy(FICHIER, nom_backup)
+
+        df = pd.read_excel(FICHIER)
+        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+        df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
+        df = df[df["date_arrivee"].notna() & df["date_depart"].notna()]
+        df["prix_brut"] = pd.to_numeric(df["prix_brut"], errors="coerce")
+        df["prix_net"] = pd.to_numeric(df["prix_net"], errors="coerce")
+        df["charges"] = df["prix_brut"] - df["prix_net"]
+        df["%"] = (df["charges"] / df["prix_brut"] * 100).round(2)
+        df["nuitees"] = (df["date_depart"] - df["date_arrivee"]).dt.days
+        df["annee"] = df["date_arrivee"].dt.year
+        df["mois"] = df["date_arrivee"].dt.month
+        return df
+    else:
+        return pd.DataFrame(columns=[
+            "nom_client", "plateforme", "telephone", "date_arrivee", "date_depart",
+            "prix_brut", "prix_net", "charges", "%", "nuitees", "annee", "mois"
+        ])
+
+# ➕ Ajout
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -55,7 +65,7 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
-# ✏️ Modifier / supprimer réservation
+# ✏️ Modification
 def modifier_reservation(df):
     st.subheader("✏️ Modifier ou Supprimer une Réservation")
     df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime('%Y-%m-%d')
@@ -94,7 +104,52 @@ def modifier_reservation(df):
             st.warning("🗑 Réservation supprimée")
     return df
 
-# 📊 Rapport mensuel
+# 📅 Calendrier
+def afficher_calendrier(df):
+    st.subheader("📅 Calendrier des réservations")
+    col1, col2 = st.columns(2)
+    with col1:
+        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
+    with col2:
+        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
+    mois_index = list(calendar.month_name).index(mois_nom)
+    date_actuelle = date(annee, mois_index, 1)
+    nb_jours = calendar.monthrange(annee, mois_index)[1]
+    jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
+    planning = {jour: [] for jour in jours}
+
+    couleurs = {
+        "Booking": "lightblue",
+        "Airbnb": "lightgreen",
+        "Autre": "orange"
+    }
+
+    for _, row in df.iterrows():
+        debut = row["date_arrivee"].date()
+        fin = row["date_depart"].date()
+        if debut and fin:
+            for jour in jours:
+                if debut <= jour < fin:
+                    couleur = couleurs.get(row["plateforme"], "lightgrey")
+                    planning[jour].append((row["nom_client"], couleur))
+
+    table = []
+    for semaine in calendar.monthcalendar(annee, mois_index):
+        ligne = []
+        for jour in semaine:
+            if jour == 0:
+                ligne.append("")
+            else:
+                jour_date = date(annee, mois_index, jour)
+                contenu = f"{jour}"
+                for nom, color in planning[jour_date]:
+                    icone = {"lightblue": "🟦", "lightgreen": "🟩", "orange": "🟧"}.get(color, "⬜")
+                    contenu += f"\n{icone} {nom}"
+                ligne.append(contenu)
+        table.append(ligne)
+    st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
+
+# 📊 Rapport
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
     mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
@@ -110,56 +165,28 @@ def rapport_mensuel(df):
             "%": "mean",
             "nuitees": "sum"
         }).reset_index()
+        reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).round(2)
+        reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).round(2)
         reg["mois"] = reg["mois"].apply(lambda x: calendar.month_name[int(x)])
+
         st.dataframe(reg.style.format({
             "prix_brut": "€{:.2f}", "prix_net": "€{:.2f}",
-            "charges": "€{:.2f}", "%": "{:.2f}%", "nuitees": "{:.0f}"
+            "charges": "€{:.2f}", "%": "{:.2f}%", "nuitees": "{:.0f}",
+            "prix_moyen_brut": "€{:.2f}", "prix_moyen_net": "€{:.2f}"
         }))
+
+        # 📤 Export Excel
+        towrite = BytesIO()
+        reg.to_excel(towrite, index=False)
+        st.download_button("📥 Télécharger le rapport Excel", towrite.getvalue(), file_name="rapport.xlsx")
     else:
         st.info("Aucune donnée disponible")
 
-# 🖨️ Export imprimable
-def imprimer_reservations_par_mois(df):
-    st.subheader("🖨️ Imprimer les réservations par mois")
-    mois = st.selectbox("Mois", sorted(df["mois"].dropna().unique()))
-    annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
-    data = df[(df["mois"] == mois) & (df["annee"] == annee)]
-
-    if data.empty:
-        st.info("Aucune réservation pour ce mois.")
-        return
-
-    data_affichee = data[[
-        "plateforme", "nom_client", "date_arrivee", "date_depart",
-        "nuitees", "prix_brut", "prix_net"
-    ]].sort_values(by="date_arrivee")
-
-    st.write(f"### Réservations pour {calendar.month_name[mois]} {annee}")
-    st.dataframe(data_affichee)
-
-    total_brut = data["prix_brut"].sum()
-    total_net = data["prix_net"].sum()
-    total_nuitees = data["nuitees"].sum()
-
-    st.markdown(f"**Total nuitées :** {total_nuitees}")
-    st.markdown(f"**Total prix brut :** €{total_brut:.2f}")
-    st.markdown(f"**Total prix net :** €{total_net:.2f}")
-
-    nom_fichier = f"reservations_{annee}_{mois}.xlsx"
-    with pd.ExcelWriter(nom_fichier) as writer:
-        data_affichee.to_excel(writer, sheet_name="Réservations", index=False)
-
-    with open(nom_fichier, "rb") as f:
-        st.download_button("📥 Télécharger Excel", f, file_name=nom_fichier)
-
-# 🚀 Lancement de l'app
+# 🚀 App
 if __name__ == "__main__":
     df = charger_donnees()
 
-    onglet = st.sidebar.radio("Navigation", [
-        "📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer",
-        "📊 Rapport", "🖨️ Imprimer Réservations Mensuelles"
-    ])
+    onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
 
     if onglet == "📋 Réservations":
         st.title("📋 Tableau des réservations")
@@ -168,7 +195,7 @@ if __name__ == "__main__":
         df = ajouter_reservation(df)
     elif onglet == "✏️ Modifier / Supprimer":
         df = modifier_reservation(df)
+    elif onglet == "📅 Calendrier":
+        afficher_calendrier(df)
     elif onglet == "📊 Rapport":
         rapport_mensuel(df)
-    elif onglet == "🖨️ Imprimer Réservations Mensuelles":
-        imprimer_reservations_par_mois(df)
