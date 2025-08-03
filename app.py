@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import datetime, timedelta, date
 import matplotlib.pyplot as plt
-import io
+from datetime import datetime, timedelta, date
+import requests
+from io import BytesIO
 
 FICHIER = "reservations.xlsx"
 
-# Chargement des données
+# 📦 Chargement des données
 def charger_donnees():
     df = pd.read_excel(FICHIER)
     df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
@@ -20,72 +21,8 @@ def charger_donnees():
     df["nuitees"] = (df["date_depart"] - df["date_arrivee"]).dt.days
     df["annee"] = df["date_arrivee"].dt.year
     df["mois"] = df["date_arrivee"].dt.month
+    df["plateforme"] = df["plateforme"].fillna("Autre")
     return df
-
-# Onglet Rapport
-def rapport_mensuel(df):
-    st.subheader("📊 Rapport mensuel")
-    mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].dropna().unique()))
-    annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
-    data = df[df["annee"] == annee]
-    if mois != "Tous":
-        data = data[data["mois"] == mois]
-    if data.empty:
-        st.info("Aucune donnée disponible")
-        return
-
-    # Agrégation
-    reg = data.groupby(["annee", "mois", "plateforme"]).agg({
-        "prix_brut": "sum",
-        "prix_net": "sum",
-        "charges": "sum",
-        "%": "mean",
-        "nuitees": "sum"
-    }).reset_index()
-
-    # Prix moyens par nuitée
-    reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).round(2)
-    reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).round(2)
-
-    reg["mois_nom"] = reg["mois"].apply(lambda x: calendar.month_name[int(x)])
-    st.dataframe(reg[[
-        "annee", "mois_nom", "plateforme", "prix_brut", "prix_net", "charges", "%",
-        "nuitees", "prix_moyen_brut", "prix_moyen_net"
-    ]].rename(columns={
-        "mois_nom": "mois"
-    }).style.format({
-        "prix_brut": "€{:.2f}", "prix_net": "€{:.2f}", "charges": "€{:.2f}",
-        "%": "{:.2f}%", "prix_moyen_brut": "€{:.2f}", "prix_moyen_net": "€{:.2f}"
-    }))
-
-    # Graphique 1 : nuitées
-    fig1, ax1 = plt.subplots()
-    nuit = data.groupby(["mois", "plateforme"])["nuitees"].sum().unstack()
-    nuit.plot(kind="bar", ax=ax1)
-    ax1.set_title("Nombre de nuitées par mois par plateforme")
-    ax1.set_xlabel("Mois")
-    ax1.set_ylabel("Nuitées")
-    st.pyplot(fig1)
-
-    # Graphique 2 : revenu net
-    fig2, ax2 = plt.subplots()
-    net = data.groupby(["mois", "plateforme"])["prix_net"].sum().unstack()
-    net.plot(kind="bar", ax=ax2)
-    ax2.set_title("Total net par mois par plateforme")
-    ax2.set_xlabel("Mois")
-    ax2.set_ylabel("Revenu net (€)")
-    st.pyplot(fig2)
-
-    # Bouton de téléchargement Excel
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        reg.to_excel(writer, index=False, sheet_name="Rapport")
-    st.download_button(
-        label="📥 Télécharger le rapport Excel",
-        data=buffer.getvalue(),
-        file_name="rapport.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
 
 # ➕ Ajouter réservation
 def ajouter_reservation(df):
@@ -115,7 +52,7 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
-# ✏️ Modifier / supprimer
+# ✏️ Modifier / supprimer réservation
 def modifier_reservation(df):
     st.subheader("✏️ Modifier ou Supprimer une Réservation")
     df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime('%Y-%m-%d')
@@ -154,50 +91,67 @@ def modifier_reservation(df):
             st.warning("🗑 Réservation supprimée")
     return df
 
-# 📅 Calendrier
-def afficher_calendrier(df):
-    st.subheader("📅 Calendrier des réservations")
-    col1, col2 = st.columns(2)
-    with col1:
-        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
-    with col2:
-        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
-    mois_index = list(calendar.month_name).index(mois_nom)
-    date_actuelle = date(annee, mois_index, 1)
-    nb_jours = calendar.monthrange(annee, mois_index)[1]
-    jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
-    planning = {jour: [] for jour in jours}
-    couleurs = {"Booking": "lightblue", "Airbnb": "lightgreen", "Autre": "orange"}
-    for _, row in df.iterrows():
-        debut = row["date_arrivee"].date()
-        fin = row["date_depart"].date()
-        for jour in jours:
-            if debut <= jour < fin:
-                couleur = couleurs.get(row["plateforme"], "lightgrey")
-                planning[jour].append((row["nom_client"], couleur))
-    table = []
-    for semaine in calendar.monthcalendar(annee, mois_index):
-        ligne = []
-        for jour in semaine:
-            if jour == 0:
-                ligne.append("")
-            else:
-                jour_date = date(annee, mois_index, jour)
-                contenu = f"{jour}"
-                for nom, color in planning[jour_date]:
-                    icone = {"lightblue": "🟦", "lightgreen": "🟩", "orange": "🟧"}.get(color, "⬜")
-                    contenu += f"\n{icone} {nom}"
-                ligne.append(contenu)
-        table.append(ligne)
-    st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
+# 📊 Rapport mensuel
+def rapport_mensuel(df):
+    st.subheader("📊 Rapport mensuel")
+    mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
+    annee = st.selectbox("Année", sorted(df["annee"].unique()))
+    data = df[df["annee"] == annee]
+    if mois != "Tous":
+        data = data[data["mois"] == mois]
 
-# 🚀 Lancement
+    if not data.empty:
+        regroup = data.groupby(["annee", "mois", "plateforme"]).agg({
+            "prix_brut": "sum",
+            "prix_net": "sum",
+            "charges": "sum",
+            "%": "mean",
+            "nuitees": "sum"
+        }).reset_index()
+
+        regroup["prix_moyen_brut"] = (regroup["prix_brut"] / regroup["nuitees"]).round(2)
+        regroup["prix_moyen_net"] = (regroup["prix_net"] / regroup["nuitees"]).round(2)
+        regroup["mois_nom"] = regroup["mois"].apply(lambda x: calendar.month_name[int(x)])
+        regroup = regroup[["annee", "mois_nom", "plateforme", "prix_brut", "prix_net", "charges", "%", "nuitees", "prix_moyen_brut", "prix_moyen_net"]]
+
+        st.dataframe(regroup.style.format({
+            "prix_brut": "€{:.2f}", "prix_net": "€{:.2f}",
+            "charges": "€{:.2f}", "%": "{:.2f}%", "prix_moyen_brut": "€{:.2f}", "prix_moyen_net": "€{:.2f}"
+        }))
+
+        # Graphique 1 : Nuitéés
+        fig1, ax1 = plt.subplots()
+        for plateforme in regroup["plateforme"].unique():
+            subset = regroup[regroup["plateforme"] == plateforme]
+            ax1.plot(subset["mois_nom"], subset["nuitees"], label=plateforme, marker="o")
+        ax1.set_title("Nuitées par mois et plateforme")
+        ax1.set_ylabel("Nuitées")
+        ax1.set_xlabel("Mois")
+        ax1.legend()
+        st.pyplot(fig1)
+
+        # Graphique 2 : Net
+        fig2, ax2 = plt.subplots()
+        for plateforme in regroup["plateforme"].unique():
+            subset = regroup[regroup["plateforme"] == plateforme]
+            ax2.plot(subset["mois_nom"], subset["prix_net"], label=plateforme, marker="o")
+        ax2.set_title("Total net par mois et plateforme")
+        ax2.set_ylabel("Prix net (€)")
+        ax2.set_xlabel("Mois")
+        ax2.legend()
+        st.pyplot(fig2)
+
+        # Bouton export
+        buffer = BytesIO()
+        regroup.to_excel(buffer, index=False)
+        st.download_button("📥 Télécharger le rapport Excel", buffer.getvalue(), file_name="rapport.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    else:
+        st.info("Aucune donnée disponible.")
+
+# 🚀 Lancement de l'app
 if __name__ == "__main__":
     df = charger_donnees()
-    onglet = st.sidebar.radio(
-        "Navigation",
-        ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"]
-    )
+    onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📊 Rapport"])
 
     if onglet == "📋 Réservations":
         st.title("📋 Tableau des réservations")
@@ -206,7 +160,5 @@ if __name__ == "__main__":
         df = ajouter_reservation(df)
     elif onglet == "✏️ Modifier / Supprimer":
         df = modifier_reservation(df)
-    elif onglet == "📅 Calendrier":
-        afficher_calendrier(df)
     elif onglet == "📊 Rapport":
         rapport_mensuel(df)
