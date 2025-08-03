@@ -1,14 +1,12 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import datetime, timedelta, date
-import requests
+from datetime import date, timedelta
 import matplotlib.pyplot as plt
 from io import BytesIO
 
 FICHIER = "reservations.xlsx"
 
-# 📦 Chargement des données
 def charger_donnees():
     df = pd.read_excel(FICHIER)
     df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
@@ -23,7 +21,6 @@ def charger_donnees():
     df["mois"] = df["date_arrivee"].dt.month
     return df
 
-# ➕ Ajouter réservation
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -51,7 +48,6 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
-# ✏️ Modifier / supprimer réservation
 def modifier_reservation(df):
     st.subheader("✏️ Modifier ou Supprimer une Réservation")
     df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime('%Y-%m-%d')
@@ -90,7 +86,6 @@ def modifier_reservation(df):
             st.warning("🗑 Réservation supprimée")
     return df
 
-# 📅 Calendrier mensuel
 def afficher_calendrier(df):
     st.subheader("📅 Calendrier des réservations")
     col1, col2 = st.columns(2)
@@ -103,12 +98,7 @@ def afficher_calendrier(df):
     nb_jours = calendar.monthrange(annee, mois_index)[1]
     jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
     planning = {jour: [] for jour in jours}
-
-    couleurs = {
-        "Booking": "lightblue",
-        "Airbnb": "lightgreen",
-        "Autre": "orange"
-    }
+    couleurs = {"Booking": "lightblue", "Airbnb": "lightgreen", "Autre": "orange"}
 
     for _, row in df.iterrows():
         debut = row["date_arrivee"].date()
@@ -134,7 +124,6 @@ def afficher_calendrier(df):
         table.append(ligne)
     st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
 
-# 📊 Rapport mensuel
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
     mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
@@ -151,8 +140,6 @@ def rapport_mensuel(df):
             "%": "mean",
             "nuitees": "sum"
         }).reset_index()
-
-        # Prix moyen par nuitée
         reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).round(2)
         reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).round(2)
         reg["mois"] = reg["mois"].apply(lambda x: calendar.month_name[int(x)])
@@ -164,33 +151,40 @@ def rapport_mensuel(df):
             "nuitees": "{:.0f}"
         }))
 
-        # 📈 Graphiques
+        total_annuel = reg.groupby("plateforme")[["prix_brut", "prix_net", "charges", "nuitees"]].sum().reset_index()
+        st.markdown("### Totaux annuels par plateforme")
+        st.dataframe(total_annuel.style.format({
+            "prix_brut": "€{:.0f}", "prix_net": "€{:.0f}",
+            "charges": "€{:.0f}", "nuitees": "{:.0f}"
+        }))
+
+        # Graphiques
         st.markdown("### 📈 Graphique : Nuitées par mois par plateforme")
         pivot_nuits = data.pivot_table(index="mois", columns="plateforme", values="nuitees", aggfunc="sum").fillna(0)
+        pivot_nuits.index = pivot_nuits.index.map(lambda x: calendar.month_name[x])
         pivot_nuits.plot(kind="bar", stacked=True)
         st.pyplot(plt.gcf())
         plt.clf()
 
         st.markdown("### 📈 Graphique : Total Net par mois par plateforme")
         pivot_net = data.pivot_table(index="mois", columns="plateforme", values="prix_net", aggfunc="sum").fillna(0)
+        pivot_net.index = pivot_net.index.map(lambda x: calendar.month_name[x])
         pivot_net.plot(kind="bar", stacked=True)
         st.pyplot(plt.gcf())
         plt.clf()
 
-        # 📥 Télécharger Excel
         buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            reg.to_excel(writer, index=False)
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            reg.to_excel(writer, sheet_name="Mensuel", index=False)
+            total_annuel.to_excel(writer, sheet_name="Annuel", index=False)
         buffer.seek(0)
         st.download_button("📥 Télécharger le rapport Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     else:
         st.info("Aucune donnée disponible pour cette période.")
 
-# 🚀 Lancement
 def main():
     df = charger_donnees()
     onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
-
     if onglet == "📋 Réservations":
         st.title("📋 Tableau des réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
