@@ -1,8 +1,8 @@
-plotly>=5.0.0
 streamlit>=1.25.0
 pandas>=1.4.0
-openpyxl  # pour lire les fichiers .xlsx
-python-dotenv  # si tu charges des variables via .env
+openpyxl
+python-dotenv
+matplotlib
 
 
 
