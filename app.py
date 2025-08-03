@@ -6,16 +6,8 @@ import requests
 import os
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement
-load_dotenv()
-
-FREE_USER_1 = os.getenv("FREE_USER_1")
-FREE_API_KEY_1 = os.getenv("FREE_API_KEY_1")
-FREE_USER_2 = os.getenv("FREE_USER_2")
-FREE_API_KEY_2 = os.getenv("FREE_API_KEY_2")
-
 FICHIER = "reservations.xlsx"
-LOG_SMS = "sms_log.txt"
+load_dotenv()
 
 # 📦 Chargement des données
 def charger_donnees():
@@ -32,28 +24,21 @@ def charger_donnees():
     df["mois"] = df["date_arrivee"].dt.month
     return df
 
-# 📨 Envoi des SMS avec journal
-def envoyer_sms(numero, message, user, key):
-    try:
-        url = f"https://smsapi.free-mobile.fr/sendmsg?user={user}&pass={key}&msg={requests.utils.quote(message)}"
-        r = requests.get(url)
-        with open(LOG_SMS, "a", encoding="utf-8") as f:
-            f.write(f"{datetime.now()} | SMS envoyé à {numero} | Réponse: {r.status_code}\n")
-        return r.status_code == 200
-    except Exception as e:
-        with open(LOG_SMS, "a", encoding="utf-8") as f:
-            f.write(f"{datetime.now()} | Échec envoi SMS à {numero} | Erreur: {e}\n")
-        return False
-
-# 📩 SMS aux clients + aux deux administrateurs
+# 📩 Envoi SMS
 def envoyer_sms_jour(df):
     demain = date.today() + timedelta(days=1)
     df_sms = df[df["date_arrivee"].dt.date == demain]
     if df_sms.empty:
         return
 
+    admin_numbers = os.getenv("NUMERO_DESTINATAIRE", "").split(",")
+    tokens = [
+        os.getenv("FREE_API_KEY_1"),
+        os.getenv("FREE_API_KEY_2"),
+    ]
+
     for _, row in df_sms.iterrows():
-        message = (
+        message_client = (
             f"Bonjour {row['nom_client']},\n"
             "Nous sommes heureux de vous accueillir demain à Nice.\n"
             "Un emplacement de parking est à votre disposition.\n"
@@ -61,15 +46,68 @@ def envoyer_sms_jour(df):
             "Bon voyage et à demain !\n"
             "Annick & Charley"
         )
-        tel = str(row["telephone"])
-        envoyer_sms(tel, message, FREE_USER_1, FREE_API_KEY_1)
 
-        # Envoi copie aux deux numéros Free
-        admin_message = f"📬 SMS client envoyé à {row['nom_client']} ({tel}) pour le {row['date_arrivee'].date()}."
-        envoyer_sms("Admin1", admin_message, FREE_USER_1, FREE_API_KEY_1)
-        envoyer_sms("Admin2", admin_message, FREE_USER_2, FREE_API_KEY_2)
+        try:
+            requests.get(
+                f"https://smsapi.free-mobile.fr/sendmsg?user={os.getenv('FREE_USER')}&pass={tokens[0]}&msg={message_client}"
+            )
+        except Exception:
+            pass
 
-# ➕ Ajouter une réservation
+    message_admin = f"📅 {len(df_sms)} arrivée(s) prévue(s) demain :\n" + "\n".join(
+        f"{row['nom_client']} - {row['plateforme']}" for _, row in df_sms.iterrows()
+    )
+
+    for idx, numero in enumerate(admin_numbers):
+        try:
+            requests.get(
+                f"https://smsapi.free-mobile.fr/sendmsg?user={os.getenv('FREE_USER')}&pass={tokens[idx]}&msg={message_admin}"
+            )
+        except Exception:
+            pass
+
+# 📅 Calendrier
+def afficher_calendrier(df):
+    st.subheader("📅 Calendrier des réservations")
+    col1, col2 = st.columns(2)
+    with col1:
+        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
+    with col2:
+        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
+    mois_index = list(calendar.month_name).index(mois_nom)
+    date_actuelle = date(annee, mois_index, 1)
+    nb_jours = calendar.monthrange(annee, mois_index)[1]
+    jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
+    planning = {jour: [] for jour in jours}
+
+    couleurs = {"Booking": "lightblue", "Airbnb": "lightgreen", "Autre": "orange"}
+
+    for _, row in df.iterrows():
+        debut = row["date_arrivee"].date()
+        fin = row["date_depart"].date()
+        if debut and fin:
+            for jour in jours:
+                if debut <= jour < fin:
+                    couleur = couleurs.get(row["plateforme"], "lightgrey")
+                    planning[jour].append((row["nom_client"], couleur))
+
+    table = []
+    for semaine in calendar.monthcalendar(annee, mois_index):
+        ligne = []
+        for jour in semaine:
+            if jour == 0:
+                ligne.append("")
+            else:
+                jour_date = date(annee, mois_index, jour)
+                contenu = f"{jour}"
+                for nom, color in planning[jour_date]:
+                    icone = {"lightblue": "🟦", "lightgreen": "🟩", "orange": "🟧"}.get(color, "⬜")
+                    contenu += f"\n{icone} {nom}"
+                ligne.append(contenu)
+        table.append(ligne)
+    st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
+
+# ➕ Ajouter réservation
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -97,7 +135,7 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
-# ✏️ Modifier / Supprimer
+# ✏️ Modifier / supprimer réservation
 def modifier_reservation(df):
     st.subheader("✏️ Modifier ou Supprimer une Réservation")
     df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime('%Y-%m-%d')
@@ -136,52 +174,7 @@ def modifier_reservation(df):
             st.warning("🗑 Réservation supprimée")
     return df
 
-# 📅 Calendrier
-def afficher_calendrier(df):
-    st.subheader("📅 Calendrier des réservations")
-    col1, col2 = st.columns(2)
-    with col1:
-        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
-    with col2:
-        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
-    mois_index = list(calendar.month_name).index(mois_nom)
-    date_actuelle = date(annee, mois_index, 1)
-    nb_jours = calendar.monthrange(annee, mois_index)[1]
-    jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
-    planning = {jour: [] for jour in jours}
-
-    couleurs = {
-        "Booking": "lightblue",
-        "Airbnb": "lightgreen",
-        "Autre": "orange"
-    }
-
-    for _, row in df.iterrows():
-        debut = row["date_arrivee"].date()
-        fin = row["date_depart"].date()
-        if debut and fin:
-            for jour in jours:
-                if debut <= jour < fin:
-                    couleur = couleurs.get(row["plateforme"], "lightgrey")
-                    planning[jour].append((row["nom_client"], couleur))
-
-    table = []
-    for semaine in calendar.monthcalendar(annee, mois_index):
-        ligne = []
-        for jour in semaine:
-            if jour == 0:
-                ligne.append("")
-            else:
-                jour_date = date(annee, mois_index, jour)
-                contenu = f"{jour}"
-                for nom, color in planning[jour_date]:
-                    icone = {"lightblue": "🟦", "lightgreen": "🟩", "orange": "🟧"}.get(color, "⬜")
-                    contenu += f"\n{icone} {nom}"
-                ligne.append(contenu)
-        table.append(ligne)
-    st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
-
-# 📊 Rapport
+# 📊 Rapport mensuel
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
     mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
@@ -189,23 +182,42 @@ def rapport_mensuel(df):
     data = df[df["annee"] == annee]
     if mois != "Tous":
         data = data[data["mois"] == mois]
+
     if not data.empty:
-        reg = data.groupby(["annee", "mois", "plateforme"]).agg({
+        regroup = data.groupby(["annee", "mois", "plateforme"]).agg({
             "prix_brut": "sum",
             "prix_net": "sum",
             "charges": "sum",
             "%": "mean",
             "nuitees": "sum"
         }).reset_index()
-        reg["mois"] = reg["mois"].apply(lambda x: calendar.month_name[int(x)])
-        st.dataframe(reg.style.format({
-            "prix_brut": "€{:.2f}", "prix_net": "€{:.2f}",
-            "charges": "€{:.2f}", "%": "{:.2f}%", "nuitees": "{:.0f}"
+
+        regroup["mois_nom"] = regroup["mois"].apply(lambda x: calendar.month_name[int(x)] if isinstance(x, int) else x)
+
+        # Sous-totaux par mois
+        sous_totaux = regroup.groupby("mois_nom").agg({
+            "prix_brut": "sum",
+            "prix_net": "sum",
+            "charges": "sum",
+            "%": "mean",
+            "nuitees": "sum"
+        }).reset_index()
+        sous_totaux["plateforme"] = "TOTAL mois"
+        sous_totaux["annee"] = annee
+
+        final = pd.concat([regroup, sous_totaux], ignore_index=True)
+
+        st.dataframe(final[["annee", "mois_nom", "plateforme", "prix_brut", "prix_net", "charges", "%", "nuitees"]].style.format({
+            "prix_brut": "€{:.2f}",
+            "prix_net": "€{:.2f}",
+            "charges": "€{:.2f}",
+            "%": "{:.2f}%",
+            "nuitees": "{:.0f}"
         }))
     else:
         st.info("Aucune donnée disponible")
 
-# 🚀 Lancement
+# 🚀 Lancement de l'app
 if __name__ == "__main__":
     df = charger_donnees()
     envoyer_sms_jour(df)
