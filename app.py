@@ -5,9 +5,12 @@ from datetime import datetime, timedelta, date
 import requests
 import os
 from dotenv import load_dotenv
+import matplotlib.pyplot as plt
+
+# Charger les variables d'environnement
+load_dotenv()
 
 FICHIER = "reservations.xlsx"
-load_dotenv()
 
 # 📦 Chargement des données
 def charger_donnees():
@@ -24,49 +27,11 @@ def charger_donnees():
     df["mois"] = df["date_arrivee"].dt.month
     return df
 
-# 📩 Envoi SMS
+# 📩 SMS automatique (placeholder, déjà en place ailleurs)
 def envoyer_sms_jour(df):
-    demain = date.today() + timedelta(days=1)
-    df_sms = df[df["date_arrivee"].dt.date == demain]
-    if df_sms.empty:
-        return
+    pass
 
-    admin_numbers = os.getenv("NUMERO_DESTINATAIRE", "").split(",")
-    tokens = [
-        os.getenv("FREE_API_KEY_1"),
-        os.getenv("FREE_API_KEY_2"),
-    ]
-
-    for _, row in df_sms.iterrows():
-        message_client = (
-            f"Bonjour {row['nom_client']},\n"
-            "Nous sommes heureux de vous accueillir demain à Nice.\n"
-            "Un emplacement de parking est à votre disposition.\n"
-            "Merci de nous indiquer votre heure approximative d’arrivée.\n"
-            "Bon voyage et à demain !\n"
-            "Annick & Charley"
-        )
-
-        try:
-            requests.get(
-                f"https://smsapi.free-mobile.fr/sendmsg?user={os.getenv('FREE_USER')}&pass={tokens[0]}&msg={message_client}"
-            )
-        except Exception:
-            pass
-
-    message_admin = f"📅 {len(df_sms)} arrivée(s) prévue(s) demain :\n" + "\n".join(
-        f"{row['nom_client']} - {row['plateforme']}" for _, row in df_sms.iterrows()
-    )
-
-    for idx, numero in enumerate(admin_numbers):
-        try:
-            requests.get(
-                f"https://smsapi.free-mobile.fr/sendmsg?user={os.getenv('FREE_USER')}&pass={tokens[idx]}&msg={message_admin}"
-            )
-        except Exception:
-            pass
-
-# 📅 Calendrier
+# 📅 Calendrier mensuel
 def afficher_calendrier(df):
     st.subheader("📅 Calendrier des réservations")
     col1, col2 = st.columns(2)
@@ -79,9 +44,7 @@ def afficher_calendrier(df):
     nb_jours = calendar.monthrange(annee, mois_index)[1]
     jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
     planning = {jour: [] for jour in jours}
-
     couleurs = {"Booking": "lightblue", "Airbnb": "lightgreen", "Autre": "orange"}
-
     for _, row in df.iterrows():
         debut = row["date_arrivee"].date()
         fin = row["date_depart"].date()
@@ -90,7 +53,6 @@ def afficher_calendrier(df):
                 if debut <= jour < fin:
                     couleur = couleurs.get(row["plateforme"], "lightgrey")
                     planning[jour].append((row["nom_client"], couleur))
-
     table = []
     for semaine in calendar.monthcalendar(annee, mois_index):
         ligne = []
@@ -151,7 +113,6 @@ def modifier_reservation(df):
         net = st.number_input("Prix net", value=float(df.at[i, "prix_net"]))
         submit = st.form_submit_button("Modifier")
         delete = st.form_submit_button("Supprimer")
-
         if submit:
             df.at[i, "nom_client"] = nom
             df.at[i, "plateforme"] = plateforme
@@ -167,7 +128,6 @@ def modifier_reservation(df):
             df.at[i, "mois"] = arrivee.month
             df.to_excel(FICHIER, index=False)
             st.success("✅ Réservation modifiée")
-
         if delete:
             df.drop(index=i, inplace=True)
             df.to_excel(FICHIER, index=False)
@@ -184,36 +144,30 @@ def rapport_mensuel(df):
         data = data[data["mois"] == mois]
 
     if not data.empty:
-        regroup = data.groupby(["annee", "mois", "plateforme"]).agg({
+        reg = data.groupby(["annee", "mois", "plateforme"]).agg({
             "prix_brut": "sum",
             "prix_net": "sum",
             "charges": "sum",
             "%": "mean",
             "nuitees": "sum"
         }).reset_index()
+        reg["mois"] = reg["mois"].apply(lambda x: calendar.month_name[int(x)])
 
-        regroup["mois_nom"] = regroup["mois"].apply(lambda x: calendar.month_name[int(x)] if isinstance(x, int) else x)
-
-        # Sous-totaux par mois
-        sous_totaux = regroup.groupby("mois_nom").agg({
-            "prix_brut": "sum",
-            "prix_net": "sum",
-            "charges": "sum",
-            "%": "mean",
-            "nuitees": "sum"
-        }).reset_index()
-        sous_totaux["plateforme"] = "TOTAL mois"
-        sous_totaux["annee"] = annee
-
-        final = pd.concat([regroup, sous_totaux], ignore_index=True)
-
-        st.dataframe(final[["annee", "mois_nom", "plateforme", "prix_brut", "prix_net", "charges", "%", "nuitees"]].style.format({
-            "prix_brut": "€{:.2f}",
-            "prix_net": "€{:.2f}",
-            "charges": "€{:.2f}",
-            "%": "{:.2f}%",
-            "nuitees": "{:.0f}"
+        st.dataframe(reg.style.format({
+            "prix_brut": "€{:.2f}", "prix_net": "€{:.2f}",
+            "charges": "€{:.2f}", "%": "{:.2f}%", "nuitees": "{:.0f}"
         }))
+
+        # 🎯 Graphique 1 : NUITÉES
+        st.markdown("### 📈 Nuitées par plateforme et par mois")
+        nuit_data = reg.pivot(index="mois", columns="plateforme", values="nuitees").fillna(0)
+        st.bar_chart(nuit_data)
+
+        # 🎯 Graphique 2 : NET
+        st.markdown("### 💰 Revenus nets par plateforme et par mois")
+        net_data = reg.pivot(index="mois", columns="plateforme", values="prix_net").fillna(0)
+        st.bar_chart(net_data)
+
     else:
         st.info("Aucune donnée disponible")
 
@@ -221,9 +175,7 @@ def rapport_mensuel(df):
 if __name__ == "__main__":
     df = charger_donnees()
     envoyer_sms_jour(df)
-
     onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
-
     if onglet == "📋 Réservations":
         st.title("📋 Tableau des réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
