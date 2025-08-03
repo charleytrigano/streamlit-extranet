@@ -6,7 +6,14 @@ import os
 
 FICHIER = "reservations.xlsx"
 
+# 📦 Chargement des données
 def charger_donnees():
+    if not os.path.exists(FICHIER):
+        return pd.DataFrame(columns=[
+            "nom_client", "plateforme", "telephone",
+            "date_arrivee", "date_depart", "prix_brut", "prix_net",
+            "charges", "%", "nuitees", "annee", "mois"
+        ])
     df = pd.read_excel(FICHIER)
     df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
     df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce")
@@ -20,6 +27,7 @@ def charger_donnees():
     df["mois"] = df["date_arrivee"].dt.month
     return df
 
+# ➕ Ajouter réservation
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -47,6 +55,7 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
+# ✏️ Modifier / supprimer réservation
 def modifier_reservation(df):
     st.subheader("✏️ Modifier ou Supprimer une Réservation")
     df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime('%Y-%m-%d')
@@ -85,124 +94,73 @@ def modifier_reservation(df):
             st.warning("🗑 Réservation supprimée")
     return df
 
-def afficher_calendrier(df):
-    st.subheader("📅 Calendrier des réservations")
-    col1, col2 = st.columns(2)
-    with col1:
-        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
-    with col2:
-        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
-    mois_index = list(calendar.month_name).index(mois_nom)
-    date_actuelle = date(annee, mois_index, 1)
-    nb_jours = calendar.monthrange(annee, mois_index)[1]
-    jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
-    planning = {jour: [] for jour in jours}
-
-    couleurs = {
-        "Booking": "lightblue",
-        "Airbnb": "lightgreen",
-        "Autre": "orange"
-    }
-
-    for _, row in df.iterrows():
-        debut = row["date_arrivee"].date()
-        fin = row["date_depart"].date()
-        if debut and fin:
-            for jour in jours:
-                if debut <= jour < fin:
-                    couleur = couleurs.get(row["plateforme"], "lightgrey")
-                    planning[jour].append((row["nom_client"], couleur))
-
-    table = []
-    for semaine in calendar.monthcalendar(annee, mois_index):
-        ligne = []
-        for jour in semaine:
-            if jour == 0:
-                ligne.append("")
-            else:
-                jour_date = date(annee, mois_index, jour)
-                contenu = f"{jour}"
-                for nom, color in planning[jour_date]:
-                    icone = {"lightblue": "🟦", "lightgreen": "🟩", "orange": "🟧"}.get(color, "⬜")
-                    contenu += f"\n{icone} {nom}"
-                ligne.append(contenu)
-        table.append(ligne)
-    st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
-
+# 📊 Rapport mensuel
 def rapport_mensuel(df):
-    st.subheader("📊 Rapport détaillé par mois et année")
-    annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
-    df_annee = df[df["annee"] == annee]
+    st.subheader("📊 Rapport mensuel")
+    mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
+    annee = st.selectbox("Année", sorted(df["annee"].unique()))
+    data = df[df["annee"] == annee]
+    if mois != "Tous":
+        data = data[data["mois"] == mois]
+    if not data.empty:
+        reg = data.groupby(["annee", "mois", "plateforme"]).agg({
+            "prix_brut": "sum",
+            "prix_net": "sum",
+            "charges": "sum",
+            "%": "mean",
+            "nuitees": "sum"
+        }).reset_index()
+        reg["mois"] = reg["mois"].apply(lambda x: calendar.month_name[int(x)])
+        st.dataframe(reg.style.format({
+            "prix_brut": "€{:.2f}", "prix_net": "€{:.2f}",
+            "charges": "€{:.2f}", "%": "{:.2f}%", "nuitees": "{:.0f}"
+        }))
+    else:
+        st.info("Aucune donnée disponible")
 
-    if df_annee.empty:
-        st.info("Aucune donnée pour cette année.")
+# 🖨️ Export imprimable
+def imprimer_reservations_par_mois(df):
+    st.subheader("🖨️ Imprimer les réservations par mois")
+    mois = st.selectbox("Mois", sorted(df["mois"].dropna().unique()))
+    annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
+    data = df[(df["mois"] == mois) & (df["annee"] == annee)]
+
+    if data.empty:
+        st.info("Aucune réservation pour ce mois.")
         return
 
-    grouped = df_annee.groupby(["mois", "plateforme"]).agg(
-        prix_brut=("prix_brut", "sum"),
-        prix_net=("prix_net", "sum"),
-        charges=("charges", "sum"),
-        pourcentage=("%", "mean"),
-        nuitees=("nuitees", "sum"),
-        prix_moyen_brut=("prix_brut", lambda x: x.sum() / df_annee.loc[x.index, "nuitees"].sum() if df_annee.loc[x.index, "nuitees"].sum() else 0),
-        prix_moyen_net=("prix_net", lambda x: x.sum() / df_annee.loc[x.index, "nuitees"].sum() if df_annee.loc[x.index, "nuitees"].sum() else 0)
-    ).reset_index()
+    data_affichee = data[[
+        "plateforme", "nom_client", "date_arrivee", "date_depart",
+        "nuitees", "prix_brut", "prix_net"
+    ]].sort_values(by="date_arrivee")
 
-    grouped["mois"] = grouped["mois"].apply(lambda x: calendar.month_name[x])
-    st.dataframe(grouped.style.format({
-        "prix_brut": "€{:.2f}", "prix_net": "€{:.2f}",
-        "charges": "€{:.2f}", "pourcentage": "{:.2f}%",
-        "prix_moyen_brut": "€{:.2f}", "prix_moyen_net": "€{:.2f}",
-        "nuitees": "{:.0f}"
-    }))
+    st.write(f"### Réservations pour {calendar.month_name[mois]} {annee}")
+    st.dataframe(data_affichee)
 
-    st.subheader("📈 Totaux annuels par plateforme")
-    totaux = df_annee.groupby("plateforme").agg(
-        total_brut=("prix_brut", "sum"),
-        total_net=("prix_net", "sum"),
-        total_charges=("charges", "sum"),
-        total_nuitees=("nuitees", "sum"),
-        prix_moyen_brut=("prix_brut", lambda x: x.sum() / df_annee.loc[x.index, "nuitees"].sum() if df_annee.loc[x.index, "nuitees"].sum() else 0),
-        prix_moyen_net=("prix_net", lambda x: x.sum() / df_annee.loc[x.index, "nuitees"].sum() if df_annee.loc[x.index, "nuitees"].sum() else 0)
-    ).reset_index()
+    total_brut = data["prix_brut"].sum()
+    total_net = data["prix_net"].sum()
+    total_nuitees = data["nuitees"].sum()
 
-    st.dataframe(totaux.style.format({
-        "total_brut": "€{:.2f}", "total_net": "€{:.2f}",
-        "total_charges": "€{:.2f}", "total_nuitees": "{:.0f}",
-        "prix_moyen_brut": "€{:.2f}", "prix_moyen_net": "€{:.2f}"
-    }))
+    st.markdown(f"**Total nuitées :** {total_nuitees}")
+    st.markdown(f"**Total prix brut :** €{total_brut:.2f}")
+    st.markdown(f"**Total prix net :** €{total_net:.2f}")
 
-    st.subheader("📊 Total général annuel toutes plateformes")
-    total_global = {
-        "total_brut": df_annee["prix_brut"].sum(),
-        "total_net": df_annee["prix_net"].sum(),
-        "total_charges": df_annee["charges"].sum(),
-        "total_nuitees": df_annee["nuitees"].sum(),
-    }
-    total_global["prix_moyen_brut"] = total_global["total_brut"] / total_global["total_nuitees"] if total_global["total_nuitees"] else 0
-    total_global["prix_moyen_net"] = total_global["total_net"] / total_global["total_nuitees"] if total_global["total_nuitees"] else 0
+    nom_fichier = f"reservations_{annee}_{mois}.xlsx"
+    with pd.ExcelWriter(nom_fichier) as writer:
+        data_affichee.to_excel(writer, sheet_name="Réservations", index=False)
 
-    df_total_global = pd.DataFrame([total_global])
-    st.dataframe(df_total_global.style.format({
-        "total_brut": "€{:.2f}", "total_net": "€{:.2f}",
-        "total_charges": "€{:.2f}", "total_nuitees": "{:.0f}",
-        "prix_moyen_brut": "€{:.2f}", "prix_moyen_net": "€{:.2f}"
-    }))
+    with open(nom_fichier, "rb") as f:
+        st.download_button("📥 Télécharger Excel", f, file_name=nom_fichier)
 
-    st.subheader("⬇️ Exporter rapport Excel")
-    if st.button("Télécharger rapport Excel"):
-        nom_fichier = f"rapport_{annee}.xlsx"
-        with pd.ExcelWriter(nom_fichier) as writer:
-            grouped.to_excel(writer, sheet_name="Mensuel", index=False)
-            totaux.to_excel(writer, sheet_name="Annuel", index=False)
-            df_total_global.to_excel(writer, sheet_name="Total Général", index=False)
-        with open(nom_fichier, "rb") as f:
-            st.download_button("📥 Télécharger Excel", f, file_name=nom_fichier)
-
-# 🚀 App
+# 🚀 Lancement de l'app
 if __name__ == "__main__":
     df = charger_donnees()
-    onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
+
+    onglet = st.sidebar.radio("Navigation", [
+        "📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer",
+        "📊 Rapport", "🖨️ Imprimer Réservations Mensuelles"
+    ])
+
     if onglet == "📋 Réservations":
         st.title("📋 Tableau des réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
@@ -210,7 +168,7 @@ if __name__ == "__main__":
         df = ajouter_reservation(df)
     elif onglet == "✏️ Modifier / Supprimer":
         df = modifier_reservation(df)
-    elif onglet == "📅 Calendrier":
-        afficher_calendrier(df)
     elif onglet == "📊 Rapport":
         rapport_mensuel(df)
+    elif onglet == "🖨️ Imprimer Réservations Mensuelles":
+        imprimer_reservations_par_mois(df)
