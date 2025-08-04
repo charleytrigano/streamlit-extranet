@@ -7,41 +7,32 @@ from fpdf import FPDF
 from io import BytesIO
 import unicodedata
 import textwrap
-import re
 
 FICHIER = "reservations.xlsx"
 
-# 🔤 Nettoyer accents & caractères spéciaux
 def nettoyer_texte(s):
     if isinstance(s, str):
-        return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+        s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+        s = s.replace("\n", " ").strip()
+        return s
     return str(s)
 
-# 🧾 Couper mots trop longs + PDF multiligne sécurisé
-def couper_mots_longs(texte, longueur_max=50):
-    mots = texte.split()
-    mots_coupes = []
-    for mot in mots:
-        if len(mot) > longueur_max:
-            mot_coupe = re.sub(f'(.{{1,{longueur_max}}})', r'\1 ', mot)
-            mots_coupes.append(mot_coupe)
-        else:
-            mots_coupes.append(mot)
-    return ' '.join(mots_coupes)
+def couper_mots_longs(texte, longueur_max=30):
+    return ' '.join([mot if len(mot) <= longueur_max else mot[:longueur_max] + '…' for mot in texte.split()])
 
 def ecrire_pdf_multiligne(pdf, texte, largeur_max=160):
     if not isinstance(texte, str) or not texte.strip():
         texte = "-"
-    texte = nettoyer_texte(texte.replace("\n", " "))
-    texte = couper_mots_longs(texte, longueur_max=30)
+    texte = nettoyer_texte(texte)
+    texte = couper_mots_longs(texte)
     lignes = textwrap.wrap(texte, width=largeur_max)
     for ligne in lignes:
         try:
-            pdf.multi_cell(0, 8, ligne)
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(0, 8, ligne, ln=1)
         except Exception:
-            pdf.multi_cell(0, 8, "<ligne non imprimable>")
+            pdf.cell(0, 8, "[ligne ignorée]", ln=1)
 
-# 📥 Chargement fichier Excel
 def charger_donnees():
     df = pd.read_excel(FICHIER)
     df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
@@ -56,7 +47,6 @@ def charger_donnees():
     df["mois"] = df["date_arrivee"].dt.month
     return df
 
-# ➕ Ajouter réservation
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -88,7 +78,6 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
-# ✏️ Modifier / Supprimer
 def modifier_reservation(df):
     st.subheader("✏️ Modifier / Supprimer")
     df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime('%Y-%m-%d')
@@ -125,7 +114,6 @@ def modifier_reservation(df):
             st.warning("🗑 Réservation supprimée")
     return df
 
-# 🗓️ Calendrier
 def afficher_calendrier(df):
     st.subheader("📅 Calendrier")
     col1, col2 = st.columns(2)
@@ -158,15 +146,13 @@ def afficher_calendrier(df):
         table.append(ligne)
     st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
 
-# 📄 Export PDF
 def exporter_pdf(data, annee):
     pdf = FPDF(orientation="L", format="A4")
     pdf.add_page()
     pdf.set_font("Helvetica", size=10)
-    pdf.cell(0, 10, txt=f"Rapport Reservations - {annee}", ln=True, align="C")
+    pdf.cell(0, 10, txt=f"Rapport Réservations - {annee}", ln=True, align="C")
     pdf.ln(5)
     for _, row in data.iterrows():
-        row = row.fillna("")
         texte = (
             f"{row['annee']} {row['mois']} | Plateforme: {row['plateforme']} | Nuitées: {row['nuitees']} | "
             f"Brut: {row['prix_brut']}€ | Net: {row['prix_net']}€ | Charges: {row['charges']}€ | "
@@ -178,7 +164,6 @@ def exporter_pdf(data, annee):
     buffer.seek(0)
     return buffer
 
-# 📊 Rapport
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
     mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
@@ -206,20 +191,17 @@ def rapport_mensuel(df):
         st.pyplot(plt.gcf())
         plt.clf()
 
-        # Excel
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             reg.to_excel(writer, index=False)
         buffer.seek(0)
         st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-        # PDF
         pdf_buffer = exporter_pdf(reg, annee)
         st.download_button("📄 Télécharger PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
     else:
         st.info("Aucune donnée pour cette période.")
 
-# ▶️ Lancement
 def main():
     df = charger_donnees()
     onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
