@@ -9,19 +9,16 @@ import unicodedata
 
 FICHIER = "reservations.xlsx"
 
-# 🔤 Nettoyer accents & caractères spéciaux
 def nettoyer_texte(s):
     if isinstance(s, str):
         return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
     return str(s)
 
-# 🧾 Écrire texte découpé dans PDF
-def ecrire_pdf_multiligne(pdf, texte, largeur_max=100):
+def ecrire_pdf_multiligne(pdf, texte, largeur_max=120):
     lignes = [texte[i:i+largeur_max] for i in range(0, len(texte), largeur_max)]
     for ligne in lignes:
         pdf.multi_cell(0, 8, ligne)
 
-# 📥 Chargement fichier Excel
 def charger_donnees():
     df = pd.read_excel(FICHIER)
     df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
@@ -36,7 +33,6 @@ def charger_donnees():
     df["mois"] = df["date_arrivee"].dt.month
     return df
 
-# ➕ Ajouter réservation
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -68,7 +64,6 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
-# ✏️ Modifier ou supprimer
 def modifier_reservation(df):
     st.subheader("✏️ Modifier / Supprimer")
     df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime('%Y-%m-%d')
@@ -105,7 +100,6 @@ def modifier_reservation(df):
             st.warning("🗑 Réservation supprimée")
     return df
 
-# 🗓️ Calendrier
 def afficher_calendrier(df):
     st.subheader("📅 Calendrier")
     col1, col2 = st.columns(2)
@@ -138,14 +132,14 @@ def afficher_calendrier(df):
         table.append(ligne)
     st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
 
-# 📄 Export PDF
 def exporter_pdf(data, annee):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", size=10)
-    pdf.cell(200, 10, txt=f"Rapport Reservations - {annee}", ln=True, align="C")
+    pdf.set_font("Helvetica", size=10)
+    pdf.multi_cell(0, 10, f"Rapport Reservations - {annee}", align="C")
     pdf.ln(5)
     for _, row in data.iterrows():
+        row = row.fillna("")
         texte = (
             f"{row['annee']} {row['mois']} | Plateforme: {row['plateforme']} | Nuitées: {row['nuitees']} | "
             f"Brut: {row['prix_brut']}€ | Net: {row['prix_net']}€ | Charges: {row['charges']}€ | "
@@ -157,7 +151,6 @@ def exporter_pdf(data, annee):
     buffer.seek(0)
     return buffer
 
-# 📊 Rapport
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
     mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
@@ -185,20 +178,17 @@ def rapport_mensuel(df):
         st.pyplot(plt.gcf())
         plt.clf()
 
-        # Excel
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             reg.to_excel(writer, index=False)
         buffer.seek(0)
         st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-        # PDF
         pdf_buffer = exporter_pdf(reg, annee)
         st.download_button("📄 Télécharger PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
     else:
         st.info("Aucune donnée pour cette période.")
 
-# ▶️ Lancement
 def main():
     df = charger_donnees()
     onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
