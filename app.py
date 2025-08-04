@@ -91,3 +91,115 @@ def modifier_reservation(df):
             df.to_excel(FICHIER, index=False)
             st.warning("🗑 Réservation supprimée")
     return df
+
+def afficher_calendrier(df):
+    st.subheader("📅 Calendrier des réservations")
+    col1, col2 = st.columns(2)
+    with col1:
+        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
+    with col2:
+        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
+    mois_index = list(calendar.month_name).index(mois_nom)
+    date_actuelle = date(annee, mois_index, 1)
+    nb_jours = calendar.monthrange(annee, mois_index)[1]
+    jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
+    planning = {jour: [] for jour in jours}
+    couleurs = {"Booking": "lightblue", "Airbnb": "lightgreen", "Autre": "orange"}
+    for _, row in df.iterrows():
+        debut = row["date_arrivee"].date()
+        fin = row["date_depart"].date()
+        for jour in jours:
+            if debut <= jour < fin:
+                couleur = couleurs.get(row["plateforme"], "grey")
+                planning[jour].append((row["nom_client"], couleur))
+    table = []
+    for semaine in calendar.monthcalendar(annee, mois_index):
+        ligne = []
+        for jour in semaine:
+            if jour == 0:
+                ligne.append("")
+            else:
+                jour_date = date(annee, mois_index, jour)
+                contenu = f"{jour}"
+                for nom, color in planning[jour_date]:
+                    icone = {"lightblue": "🟦", "lightgreen": "🟩", "orange": "🟧"}.get(color, "⬜")
+                    contenu += f"\n{icone} {nom}"
+                ligne.append(contenu)
+        table.append(ligne)
+    st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
+
+def exporter_pdf(data, annee):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=10)
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.cell(200, 10, txt=f"Rapport Reservations - {annee}", ln=True, align="C")
+    for index, row in data.iterrows():
+        texte = (
+            f"{int(row['annee'])} {calendar.month_name[int(row['mois'])]} | Plateforme: {row['plateforme']} | "
+            f"Nuitees: {int(row['nuitees'])} | Brut: {row['prix_brut']}€ | Net: {row['prix_net']}€ | "
+            f"Charges: {row['charges']}€ | Moy. brut/nuit: {row['prix_moyen_brut']}€ | Moy. net/nuit: {row['prix_moyen_net']}€"
+        )
+        texte = nettoyer_texte(texte)
+        pdf.multi_cell(0, 8, texte)
+    buffer = BytesIO()
+    pdf.output(buffer)
+    buffer.seek(0)
+    return buffer
+
+def rapport_mensuel(df):
+    st.subheader("📊 Rapport mensuel")
+    mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
+    annee = st.selectbox("Année", sorted(df["annee"].unique()))
+    data = df[df["annee"] == annee]
+    if mois != "Tous":
+        data = data[data["mois"] == mois]
+    if not data.empty:
+        reg = data.groupby(["annee", "mois", "plateforme"]).agg({
+            "prix_brut": "sum",
+            "prix_net": "sum",
+            "charges": "sum",
+            "%": "mean",
+            "nuitees": "sum"
+        }).reset_index()
+        reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).round(2)
+        reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).round(2)
+        reg["mois"] = reg["mois"].apply(lambda x: calendar.month_name[int(x)])
+        st.dataframe(reg)
+        st.markdown("### 📈 Nuitées par mois")
+        pivot_nuits = data.pivot_table(index="mois", columns="plateforme", values="nuitees", aggfunc="sum").fillna(0)
+        pivot_nuits.plot(kind="bar", stacked=True)
+        st.pyplot(plt.gcf())
+        plt.clf()
+        st.markdown("### 📈 Total Net par mois")
+        pivot_net = data.pivot_table(index="mois", columns="plateforme", values="prix_net", aggfunc="sum").fillna(0)
+        pivot_net.plot(kind="bar", stacked=True)
+        st.pyplot(plt.gcf())
+        plt.clf()
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            reg.to_excel(writer, index=False)
+        buffer.seek(0)
+        st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        pdf_buffer = exporter_pdf(reg, annee)
+        st.download_button("📄 Télécharger PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
+    else:
+        st.warning("Aucune donnée pour cette période.")
+
+def main():
+    df = charger_donnees()
+    onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
+    if onglet == "📋 Réservations":
+        st.title("📋 Réservations")
+        st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
+    elif onglet == "➕ Ajouter":
+        df = ajouter_reservation(df)
+    elif onglet == "✏️ Modifier / Supprimer":
+        df = modifier_reservation(df)
+    elif onglet == "📅 Calendrier":
+        afficher_calendrier(df)
+    elif onglet == "📊 Rapport":
+        rapport_mensuel(df)
+
+if __name__ == "__main__":
+    main()
