@@ -1,14 +1,14 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import datetime, timedelta, date
+from datetime import date, timedelta
 import matplotlib.pyplot as plt
 from io import BytesIO
 from fpdf import FPDF
-import os
 
 FICHIER = "reservations.xlsx"
 
+# 📦 Chargement des données
 def charger_donnees():
     df = pd.read_excel(FICHIER)
     df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
@@ -23,6 +23,7 @@ def charger_donnees():
     df["mois"] = df["date_arrivee"].dt.month
     return df
 
+# ➕ Ajouter une réservation
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -50,6 +51,7 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
+# ✏️ Modifier ou supprimer une réservation
 def modifier_reservation(df):
     st.subheader("✏️ Modifier ou Supprimer une Réservation")
     df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime('%Y-%m-%d')
@@ -65,7 +67,6 @@ def modifier_reservation(df):
         net = st.number_input("Prix net", value=float(df.at[i, "prix_net"]))
         submit = st.form_submit_button("Modifier")
         delete = st.form_submit_button("Supprimer")
-
         if submit:
             df.at[i, "nom_client"] = nom
             df.at[i, "plateforme"] = plateforme
@@ -81,15 +82,15 @@ def modifier_reservation(df):
             df.at[i, "mois"] = arrivee.month
             df.to_excel(FICHIER, index=False)
             st.success("✅ Réservation modifiée")
-
         if delete:
             df.drop(index=i, inplace=True)
             df.to_excel(FICHIER, index=False)
             st.warning("🗑 Réservation supprimée")
     return df
 
+# 📅 Calendrier
 def afficher_calendrier(df):
-    st.subheader("📅 Calendrier des réservations")
+    st.subheader("📅 Calendrier")
     col1, col2 = st.columns(2)
     with col1:
         mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
@@ -100,13 +101,7 @@ def afficher_calendrier(df):
     nb_jours = calendar.monthrange(annee, mois_index)[1]
     jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
     planning = {jour: [] for jour in jours}
-
-    couleurs = {
-        "Booking": "lightblue",
-        "Airbnb": "lightgreen",
-        "Autre": "orange"
-    }
-
+    couleurs = {"Booking": "lightblue", "Airbnb": "lightgreen", "Autre": "orange"}
     for _, row in df.iterrows():
         debut = row["date_arrivee"].date()
         fin = row["date_depart"].date()
@@ -114,7 +109,6 @@ def afficher_calendrier(df):
             if debut <= jour < fin:
                 couleur = couleurs.get(row["plateforme"], "lightgrey")
                 planning[jour].append((row["nom_client"], couleur))
-
     table = []
     for semaine in calendar.monthcalendar(annee, mois_index):
         ligne = []
@@ -131,38 +125,34 @@ def afficher_calendrier(df):
         table.append(ligne)
     st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
 
+# 🖨️ Export PDF
 def exporter_pdf(data, annee):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=10)
-
-    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-    if not os.path.exists(font_path):
-        font_path = "/usr/share/fonts/dejavu/DejaVuSans.ttf"
-
-    pdf.add_font("DejaVu", "", font_path, uni=True)
-    pdf.set_font("DejaVu", size=10)
-
+    pdf.set_font("Arial", size=10)
     grouped = data.groupby(["mois", "plateforme"])
     for (mois, plateforme), groupe in grouped:
         pdf.add_page()
-        pdf.set_font("DejaVu", "B", 14)
+        pdf.set_font("Arial", 'B', 14)
         titre = f"{calendar.month_name[mois]} {annee} - {plateforme}"
-        pdf.cell(0, 10, titre, ln=True)
-        pdf.set_font("DejaVu", "", 10)
-
+        pdf.cell(0, 10, titre.encode('latin-1', 'replace').decode('latin-1'), ln=True)
+        pdf.set_font("Arial", size=10)
         for _, row in groupe.iterrows():
-            txt = f"{row['nom_client']}: {row['date_arrivee'].date()} → {row['date_depart'].date()}, {row['nuitees']} nuitées, {row['prix_brut']}€ brut, {row['prix_net']}€ net"
-            pdf.multi_cell(0, 8, txt)
-
+            txt = (
+                f"{row['nom_client']}: {row['date_arrivee'].date()} → {row['date_depart'].date()}, "
+                f"{row['nuitees']} nuitées, {row['prix_brut']}€ brut, {row['prix_net']}€ net"
+            )
+            pdf.multi_cell(0, 8, txt.encode('latin-1', 'replace').decode('latin-1'))
         total = groupe[["prix_brut", "prix_net", "nuitees"]].sum()
-        pdf.set_font("DejaVu", "B", 10)
-        pdf.cell(0, 10, f"TOTAL: {int(total['nuitees'])} nuitées, {total['prix_brut']}€ brut, {total['prix_net']}€ net", ln=True)
-
+        total_txt = f"TOTAL: {int(total['nuitees'])} nuitées, {total['prix_brut']}€ brut, {total['prix_net']}€ net"
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(0, 10, total_txt.encode('latin-1', 'replace').decode('latin-1'), ln=True)
     buffer = BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
     return buffer
 
+# 📊 Rapport
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
     mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
@@ -170,52 +160,43 @@ def rapport_mensuel(df):
     data = df[df["annee"] == annee]
     if mois != "Tous":
         data = data[data["mois"] == mois]
-
     if not data.empty:
         reg = data.groupby(["annee", "mois", "plateforme"]).agg({
-            "prix_brut": "sum",
-            "prix_net": "sum",
-            "charges": "sum",
-            "%": "mean",
-            "nuitees": "sum"
+            "prix_brut": "sum", "prix_net": "sum", "charges": "sum",
+            "%": "mean", "nuitees": "sum"
         }).reset_index()
-
         reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).round(2)
         reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).round(2)
         reg["mois"] = reg["mois"].apply(lambda x: calendar.month_name[int(x)])
-
         st.dataframe(reg.style.format({
             "prix_brut": "€{:.2f}", "prix_net": "€{:.2f}",
             "charges": "€{:.2f}", "%": "{:.2f}%",
             "prix_moyen_brut": "€{:.2f}", "prix_moyen_net": "€{:.2f}",
             "nuitees": "{:.0f}"
         }))
-
         st.markdown("### 📈 Total Net par mois")
         pivot = data.pivot_table(index="mois", columns="plateforme", values="prix_net", aggfunc="sum").fillna(0)
         pivot.plot(kind="bar", stacked=True)
         st.pyplot(plt.gcf())
         plt.clf()
-
         st.markdown("### 📈 Nuitées par mois")
         pivot2 = data.pivot_table(index="mois", columns="plateforme", values="nuitees", aggfunc="sum").fillna(0)
         pivot2.plot(kind="bar", stacked=True)
         st.pyplot(plt.gcf())
         plt.clf()
-
-        # 📥 Excel
-        buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        # 📥 Export Excel
+        excel_buf = BytesIO()
+        with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
             reg.to_excel(writer, index=False)
-        buffer.seek(0)
-        st.download_button("📥 Télécharger le rapport Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-        # 📄 PDF
+        excel_buf.seek(0)
+        st.download_button("📥 Télécharger Excel", data=excel_buf, file_name="rapport.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # 🖨️ Export PDF
         pdf_buffer = exporter_pdf(data, annee)
-        st.download_button("📄 Exporter en PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
+        st.download_button("🖨️ Exporter PDF", data=pdf_buffer, file_name="rapport.pdf", mime="application/pdf")
     else:
         st.info("Aucune donnée disponible.")
 
+# 🚀 Main
 def main():
     df = charger_donnees()
     onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
