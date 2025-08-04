@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import datetime, timedelta, date
+from datetime import date, timedelta
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
@@ -70,7 +70,6 @@ def modifier_reservation(df):
         net = st.number_input("Prix net", value=float(df.at[i, "prix_net"]))
         submit = st.form_submit_button("Modifier")
         delete = st.form_submit_button("Supprimer")
-
         if submit:
             df.at[i, "nom_client"] = nom
             df.at[i, "plateforme"] = plateforme
@@ -86,7 +85,6 @@ def modifier_reservation(df):
             df.at[i, "mois"] = arrivee.month
             df.to_excel(FICHIER, index=False)
             st.success("✅ Réservation modifiée")
-
         if delete:
             df.drop(index=i, inplace=True)
             df.to_excel(FICHIER, index=False)
@@ -94,25 +92,18 @@ def modifier_reservation(df):
     return df
 
 def afficher_calendrier(df):
-    st.subheader("📅 Calendrier des réservations")
-    col1, col2 = st.columns(2)
-    with col1:
-        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
-    with col2:
-        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
+    st.subheader("📅 Calendrier")
+    mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
+    annee = st.selectbox("Année", sorted(df["annee"].unique()))
     mois_index = list(calendar.month_name).index(mois_nom)
-    date_actuelle = date(annee, mois_index, 1)
     nb_jours = calendar.monthrange(annee, mois_index)[1]
-    jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
+    jours = [date(annee, mois_index, j) for j in range(1, nb_jours+1)]
     planning = {jour: [] for jour in jours}
-    couleurs = {"Booking": "lightblue", "Airbnb": "lightgreen", "Autre": "orange"}
     for _, row in df.iterrows():
-        debut = row["date_arrivee"].date()
-        fin = row["date_depart"].date()
+        debut, fin = row["date_arrivee"].date(), row["date_depart"].date()
         for jour in jours:
             if debut <= jour < fin:
-                couleur = couleurs.get(row["plateforme"], "grey")
-                planning[jour].append((row["nom_client"], couleur))
+                planning[jour].append((row["nom_client"], row["plateforme"]))
     table = []
     for semaine in calendar.monthcalendar(annee, mois_index):
         ligne = []
@@ -122,8 +113,8 @@ def afficher_calendrier(df):
             else:
                 jour_date = date(annee, mois_index, jour)
                 contenu = f"{jour}"
-                for nom, color in planning[jour_date]:
-                    icone = {"lightblue": "🟦", "lightgreen": "🟩", "orange": "🟧"}.get(color, "⬜")
+                for nom, plateforme in planning[jour_date]:
+                    icone = {"Booking": "🟦", "Airbnb": "🟩", "Autre": "🟧"}.get(plateforme, "⬜")
                     contenu += f"\n{icone} {nom}"
                 ligne.append(contenu)
         table.append(ligne)
@@ -133,13 +124,12 @@ def exporter_pdf(data, annee):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=10)
-    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.cell(200, 10, txt=f"Rapport Réservations - {annee}", ln=True, align="C")
     for index, row in data.iterrows():
         texte = (
             f"{row['annee']} {calendar.month_name[int(row['mois'])]} | Plateforme: {row['plateforme']} | "
-            f"Nuitées: {row['nuitees']} | Brut: {row['prix_brut']}€ | Net: {row['prix_net']}€ | "
-            f"Charges: {row['charges']}€ | Moy. brut/nuit: {row['prix_moyen_brut']}€ | Moy. net/nuit: {row['prix_moyen_net']}€"
+            f"Nuitées: {int(row['nuitees'])} | Brut: {row['prix_brut']:.2f}€ | Net: {row['prix_net']:.2f}€ | "
+            f"Charges: {row['charges']:.2f}€ | Moy. brut/nuit: {row['prix_moyen_brut']:.2f}€ | Moy. net/nuit: {row['prix_moyen_net']:.2f}€"
         )
         pdf.multi_cell(0, 8, nettoyer_texte(texte))
     buffer = BytesIO()
@@ -169,28 +159,23 @@ def rapport_mensuel(df):
         st.markdown("### 📈 Nuitées par mois")
         pivot_nuits = data.pivot_table(index="mois", columns="plateforme", values="nuitees", aggfunc="sum").fillna(0)
         pivot_nuits.plot(kind="bar", stacked=True)
-        st.pyplot(plt.gcf())
-        plt.clf()
+        st.pyplot(plt.gcf()); plt.clf()
         st.markdown("### 📈 Total Net par mois")
         pivot_net = data.pivot_table(index="mois", columns="plateforme", values="prix_net", aggfunc="sum").fillna(0)
         pivot_net.plot(kind="bar", stacked=True)
-        st.pyplot(plt.gcf())
-        plt.clf()
-        # Télécharger Excel
+        st.pyplot(plt.gcf()); plt.clf()
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             reg.to_excel(writer, index=False)
         buffer.seek(0)
-        st.download_button("📥 Télécharger le rapport Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        # Télécharger PDF
-        pdf_buffer = exporter_pdf(reg, annee)
-        st.download_button("📄 Télécharger le rapport PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
+        st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button("📄 Télécharger PDF", data=exporter_pdf(reg, annee), file_name=f"rapport_{annee}.pdf", mime="application/pdf")
     else:
-        st.warning("Aucune donnée pour cette période.")
+        st.info("Aucune donnée disponible pour cette période.")
 
 def main():
     df = charger_donnees()
-    onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
+    onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
     if onglet == "📋 Réservations":
         st.title("📋 Réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
