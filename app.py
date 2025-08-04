@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
 import unicodedata
+import textwrap
 
 FICHIER = "reservations.xlsx"
 
@@ -15,7 +16,11 @@ def nettoyer_texte(s):
     return str(s)
 
 def ecrire_pdf_multiligne(pdf, texte, largeur_max=160):
-    lignes = [texte[i:i+largeur_max] for i in range(0, len(texte), largeur_max)]
+    if not texte.strip():
+        texte = "-"
+    # Ajoute artificiellement des espaces dans les mots trop longs
+    texte = " ".join(textwrap.wrap(texte, width=50))
+    lignes = textwrap.wrap(texte, width=largeur_max)
     for ligne in lignes:
         pdf.multi_cell(0, 8, ligne)
 
@@ -178,14 +183,12 @@ def rapport_mensuel(df):
         st.pyplot(plt.gcf())
         plt.clf()
 
-        # Excel
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             reg.to_excel(writer, index=False)
         buffer.seek(0)
         st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-        # PDF
         pdf_buffer = exporter_pdf(reg, annee)
         st.download_button("📄 Télécharger PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
     else:
