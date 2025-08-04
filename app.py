@@ -132,4 +132,79 @@ def afficher_calendrier(df):
         table.append(ligne)
     st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
 
-def exporter_pdf
+def exporter_pdf(data, annee):
+    pdf = FPDF(orientation="L", format="A4")  # Mode paysage
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=10)
+    pdf.cell(0, 10, txt=f"Rapport Reservations - {annee}", ln=True, align="C")
+    pdf.ln(5)
+    for _, row in data.iterrows():
+        row = row.fillna("")
+        texte = (
+            f"{row['annee']} {row['mois']} | Plateforme: {row['plateforme']} | Nuitées: {row['nuitees']} | "
+            f"Brut: {row['prix_brut']}€ | Net: {row['prix_net']}€ | Charges: {row['charges']}€ | "
+            f"Moy. brut/nuit: {row['prix_moyen_brut']}€ | Moy. net/nuit: {row['prix_moyen_net']}€"
+        )
+        ecrire_pdf_multiligne(pdf, nettoyer_texte(texte), largeur_max=160)
+    buffer = BytesIO()
+    pdf.output(buffer)
+    buffer.seek(0)
+    return buffer
+
+def rapport_mensuel(df):
+    st.subheader("📊 Rapport mensuel")
+    mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
+    annee = st.selectbox("Année", sorted(df["annee"].unique()))
+    data = df[df["annee"] == annee]
+    if mois != "Tous":
+        data = data[data["mois"] == mois]
+    if not data.empty:
+        reg = data.groupby(["annee", "mois", "plateforme"]).agg({
+            "prix_brut": "sum", "prix_net": "sum", "charges": "sum", "%": "mean", "nuitees": "sum"
+        }).reset_index()
+        reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).round(2)
+        reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).round(2)
+        st.dataframe(reg)
+
+        st.markdown("### 📈 Nuitées par mois")
+        pivot_nuits = data.pivot_table(index="mois", columns="plateforme", values="nuitees", aggfunc="sum").fillna(0)
+        pivot_nuits.plot(kind="bar", stacked=True)
+        st.pyplot(plt.gcf())
+        plt.clf()
+
+        st.markdown("### 📈 Total Net par mois")
+        pivot_net = data.pivot_table(index="mois", columns="plateforme", values="prix_net", aggfunc="sum").fillna(0)
+        pivot_net.plot(kind="bar", stacked=True)
+        st.pyplot(plt.gcf())
+        plt.clf()
+
+        # Excel
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            reg.to_excel(writer, index=False)
+        buffer.seek(0)
+        st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        # PDF
+        pdf_buffer = exporter_pdf(reg, annee)
+        st.download_button("📄 Télécharger PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
+    else:
+        st.info("Aucune donnée pour cette période.")
+
+def main():
+    df = charger_donnees()
+    onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
+    if onglet == "📋 Réservations":
+        st.title("📋 Réservations")
+        st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
+    elif onglet == "➕ Ajouter":
+        df = ajouter_reservation(df)
+    elif onglet == "✏️ Modifier / Supprimer":
+        df = modifier_reservation(df)
+    elif onglet == "📅 Calendrier":
+        afficher_calendrier(df)
+    elif onglet == "📊 Rapport":
+        rapport_mensuel(df)
+
+if __name__ == "__main__":
+    main()
