@@ -6,32 +6,21 @@ import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
 import unicodedata
-import textwrap
 
 FICHIER = "reservations.xlsx"
 
 def nettoyer_texte(s):
     if isinstance(s, str):
-        s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
-        s = s.replace("\n", " ").strip()
-        return s
+        return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
     return str(s)
 
-def couper_mots_longs(texte, longueur_max=30):
-    return ' '.join([mot if len(mot) <= longueur_max else mot[:longueur_max] + '…' for mot in texte.split()])
-
 def ecrire_pdf_multiligne(pdf, texte, largeur_max=160):
-    if not isinstance(texte, str) or not texte.strip():
-        texte = "-"
-    texte = nettoyer_texte(texte)
-    texte = couper_mots_longs(texte)
-    lignes = textwrap.wrap(texte, width=largeur_max)
+    lignes = [texte[i:i+largeur_max] for i in range(0, len(texte), largeur_max)]
     for ligne in lignes:
         try:
-            pdf.set_x(pdf.l_margin)
-            pdf.cell(0, 8, ligne, ln=1)
-        except Exception:
-            pdf.cell(0, 8, "[ligne ignorée]", ln=1)
+            pdf.multi_cell(0, 8, ligne)
+        except:
+            pdf.multi_cell(0, 8, "<ligne non imprimable>")
 
 def charger_donnees():
     df = pd.read_excel(FICHIER)
@@ -147,18 +136,19 @@ def afficher_calendrier(df):
     st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
 
 def exporter_pdf(data, annee):
-    pdf = FPDF(orientation="L", format="A4")
+    pdf = FPDF(orientation="L", format="A4")  # Mode paysage
     pdf.add_page()
     pdf.set_font("Helvetica", size=10)
-    pdf.cell(0, 10, txt=f"Rapport Réservations - {annee}", ln=True, align="C")
+    pdf.cell(0, 10, txt=f"Rapport Reservations - {annee}", ln=True, align="C")
     pdf.ln(5)
     for _, row in data.iterrows():
+        row = row.fillna("")
         texte = (
-            f"{row['annee']} {row['mois']} | Plateforme: {row['plateforme']} | Nuitées: {row['nuitees']} | "
-            f"Brut: {row['prix_brut']}€ | Net: {row['prix_net']}€ | Charges: {row['charges']}€ | "
-            f"Moy. brut/nuit: {row['prix_moyen_brut']}€ | Moy. net/nuit: {row['prix_moyen_net']}€"
+            f"{row['annee']} {row['mois']} | Plateforme: {row['plateforme']} | Nuitées: {int(row['nuitees'])} | "
+            f"Brut: {row['prix_brut']:.2f}€ | Net: {row['prix_net']:.2f}€ | Charges: {row['charges']:.2f}€ | "
+            f"Moy. brut/nuit: {row['prix_moyen_brut']:.2f}€ | Moy. net/nuit: {row['prix_moyen_net']:.2f}€"
         )
-        ecrire_pdf_multiligne(pdf, texte, largeur_max=160)
+        ecrire_pdf_multiligne(pdf, nettoyer_texte(texte), largeur_max=160)
     buffer = BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
