@@ -11,7 +11,9 @@ FICHIER = "reservations.xlsx"
 
 def nettoyer_texte(s):
     if isinstance(s, str):
-        return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+        s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+        s = s.replace('\n', ' ').replace('\r', '')
+        return s
     return str(s)
 
 def charger_donnees():
@@ -27,6 +29,7 @@ def charger_donnees():
     df["annee"] = df["date_arrivee"].dt.year
     df["mois"] = df["date_arrivee"].dt.month
     return df
+
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -134,14 +137,22 @@ def exporter_pdf(data, annee):
     pdf.set_font("Arial", size=10)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.cell(200, 10, txt=f"Rapport Reservations - {annee}", ln=True, align="C")
+
     for index, row in data.iterrows():
         texte = (
-            f"{int(row['annee'])} {calendar.month_name[int(row['mois'])]} | Plateforme: {row['plateforme']} | "
-            f"Nuitees: {int(row['nuitees'])} | Brut: {row['prix_brut']}€ | Net: {row['prix_net']}€ | "
-            f"Charges: {row['charges']}€ | Moy. brut/nuit: {row['prix_moyen_brut']}€ | Moy. net/nuit: {row['prix_moyen_net']}€"
+            f"{int(row['annee'])} {calendar.month_name[int(row['mois'])]} | "
+            f"Plateforme: {row['plateforme']} | Nuitées: {int(row['nuitees'])} | "
+            f"Brut: {row['prix_brut']}€ | Net: {row['prix_net']}€ | "
+            f"Charges: {row['charges']}€ | "
+            f"Moy. brut/nuit: {row['prix_moyen_brut']}€ | Moy. net/nuit: {row['prix_moyen_net']}€"
         )
         texte = nettoyer_texte(texte)
-        pdf.multi_cell(0, 8, texte)
+
+        # Découpe à 100 caractères pour éviter les débordements
+        lignes = [texte[i:i+100] for i in range(0, len(texte), 100)]
+        for ligne in lignes:
+            pdf.multi_cell(0, 8, ligne)
+
     buffer = BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
@@ -176,11 +187,13 @@ def rapport_mensuel(df):
         pivot_net.plot(kind="bar", stacked=True)
         st.pyplot(plt.gcf())
         plt.clf()
+        # Télécharger Excel
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             reg.to_excel(writer, index=False)
         buffer.seek(0)
-        st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button("📥 Télécharger le rapport Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # Télécharger PDF
         pdf_buffer = exporter_pdf(reg, annee)
         st.download_button("📄 Télécharger PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
     else:
