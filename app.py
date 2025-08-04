@@ -14,13 +14,11 @@ def nettoyer_texte(s):
         return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
     return str(s)
 
-def ecrire_pdf_multiligne(pdf, texte, largeur_max=160):
-    lignes = [texte[i:i+largeur_max] for i in range(0, len(texte), largeur_max)]
-    for ligne in lignes:
-        try:
-            pdf.multi_cell(0, 8, ligne)
-        except:
-            pdf.multi_cell(0, 8, "<ligne non imprimable>")
+def ecrire_pdf_multiligne(pdf, texte):
+    try:
+        pdf.cell(0, 8, texte, ln=1)
+    except Exception as e:
+        pdf.cell(0, 8, f"<Erreur ligne: {str(e)}>", ln=1)
 
 def charger_donnees():
     df = pd.read_excel(FICHIER)
@@ -136,7 +134,7 @@ def afficher_calendrier(df):
     st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
 
 def exporter_pdf(data, annee):
-    pdf = FPDF(orientation="L", format="A4")  # Mode paysage
+    pdf = FPDF(orientation="L", format="A4")
     pdf.add_page()
     pdf.set_font("Helvetica", size=10)
     pdf.cell(0, 10, txt=f"Rapport Reservations - {annee}", ln=True, align="C")
@@ -144,11 +142,11 @@ def exporter_pdf(data, annee):
     for _, row in data.iterrows():
         row = row.fillna("")
         texte = (
-            f"{row['annee']} {row['mois']} | Plateforme: {row['plateforme']} | Nuitées: {int(row['nuitees'])} | "
+            f"{row['annee']} {row['mois']} | Plateforme: {row['plateforme']} | Nuitées: {row['nuitees']} | "
             f"Brut: {row['prix_brut']:.2f}€ | Net: {row['prix_net']:.2f}€ | Charges: {row['charges']:.2f}€ | "
             f"Moy. brut/nuit: {row['prix_moyen_brut']:.2f}€ | Moy. net/nuit: {row['prix_moyen_net']:.2f}€"
         )
-        ecrire_pdf_multiligne(pdf, nettoyer_texte(texte), largeur_max=160)
+        ecrire_pdf_multiligne(pdf, nettoyer_texte(texte))
     buffer = BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
@@ -181,12 +179,14 @@ def rapport_mensuel(df):
         st.pyplot(plt.gcf())
         plt.clf()
 
+        # Excel
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             reg.to_excel(writer, index=False)
         buffer.seek(0)
         st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+        # PDF
         pdf_buffer = exporter_pdf(reg, annee)
         st.download_button("📄 Télécharger PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
     else:
