@@ -2,5 +2,4 @@ streamlit>=1.25.0
 pandas>=1.4.0
 openpyxl
 matplotlib
-fpdf2
 fpdf
