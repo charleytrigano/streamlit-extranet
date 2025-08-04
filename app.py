@@ -1,12 +1,19 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import date, timedelta
+from datetime import datetime, timedelta, date
 import matplotlib.pyplot as plt
 from io import BytesIO
+from fpdf import FPDF
+import smtplib
+from email.message import EmailMessage
+import ssl
+import os
+from dotenv import load_dotenv
 
 FICHIER = "reservations.xlsx"
 
+# 📦 Chargement des données
 def charger_donnees():
     df = pd.read_excel(FICHIER)
     df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
@@ -21,6 +28,7 @@ def charger_donnees():
     df["mois"] = df["date_arrivee"].dt.month
     return df
 
+# ➕ Ajouter réservation
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -48,82 +56,51 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
-def modifier_reservation(df):
-    st.subheader("✏️ Modifier ou Supprimer une Réservation")
-    df["identifiant"] = df["nom_client"] + " | " + df["date_arrivee"].dt.strftime('%Y-%m-%d')
-    selection = st.selectbox("Choisissez une réservation", df["identifiant"])
-    i = df[df["identifiant"] == selection].index[0]
-    with st.form("modif"):
-        nom = st.text_input("Nom", df.at[i, "nom_client"])
-        plateforme = st.selectbox("Plateforme", ["Booking", "Airbnb", "Autre"], index=["Booking", "Airbnb", "Autre"].index(df.at[i, "plateforme"]))
-        tel = st.text_input("Téléphone", df.at[i, "telephone"])
-        arrivee = st.date_input("Arrivée", df.at[i, "date_arrivee"].date())
-        depart = st.date_input("Départ", df.at[i, "date_depart"].date())
-        brut = st.number_input("Prix brut", value=float(df.at[i, "prix_brut"]))
-        net = st.number_input("Prix net", value=float(df.at[i, "prix_net"]))
-        submit = st.form_submit_button("Modifier")
-        delete = st.form_submit_button("Supprimer")
+# 📊 Rapport PDF
+def generer_pdf(data):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(200, 10, "📄 Rapport Réservations", ln=True, align="C")
 
-        if submit:
-            df.at[i, "nom_client"] = nom
-            df.at[i, "plateforme"] = plateforme
-            df.at[i, "telephone"] = tel
-            df.at[i, "date_arrivee"] = arrivee
-            df.at[i, "date_depart"] = depart
-            df.at[i, "prix_brut"] = brut
-            df.at[i, "prix_net"] = net
-            df.at[i, "charges"] = brut - net
-            df.at[i, "%"] = round((brut - net) / brut * 100, 2) if brut else 0
-            df.at[i, "nuitees"] = (depart - arrivee).days
-            df.at[i, "annee"] = arrivee.year
-            df.at[i, "mois"] = arrivee.month
-            df.to_excel(FICHIER, index=False)
-            st.success("✅ Réservation modifiée")
+    grouped = data.groupby(["annee", "mois", "plateforme"])
+    for (annee, mois, plateforme), group in grouped:
+        pdf.set_font("Arial", "B", 12)
+        titre = f"{calendar.month_name[mois]} {annee} - {plateforme}"
+        pdf.cell(200, 10, titre, ln=True)
 
-        if delete:
-            df.drop(index=i, inplace=True)
-            df.to_excel(FICHIER, index=False)
-            st.warning("🗑 Réservation supprimée")
-    return df
+        # En-têtes
+        pdf.set_font("Arial", "B", 9)
+        headers = ["Client", "Arrivée", "Départ", "Nuits", "Brut", "Net"]
+        for h in headers:
+            pdf.cell(32, 7, h, border=1)
+        pdf.ln()
 
-def afficher_calendrier(df):
-    st.subheader("📅 Calendrier des réservations")
-    col1, col2 = st.columns(2)
-    with col1:
-        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
-    with col2:
-        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
-    mois_index = list(calendar.month_name).index(mois_nom)
-    date_actuelle = date(annee, mois_index, 1)
-    nb_jours = calendar.monthrange(annee, mois_index)[1]
-    jours = [date_actuelle + timedelta(days=i) for i in range(nb_jours)]
-    planning = {jour: [] for jour in jours}
-    couleurs = {"Booking": "lightblue", "Airbnb": "lightgreen", "Autre": "orange"}
+        pdf.set_font("Arial", "", 9)
+        for _, row in group.iterrows():
+            pdf.cell(32, 6, str(row["nom_client"]), border=1)
+            pdf.cell(32, 6, row["date_arrivee"].strftime("%d/%m"), border=1)
+            pdf.cell(32, 6, row["date_depart"].strftime("%d/%m"), border=1)
+            pdf.cell(32, 6, str(row["nuitees"]), border=1)
+            pdf.cell(32, 6, f"{row['prix_brut']:.2f}", border=1)
+            pdf.cell(32, 6, f"{row['prix_net']:.2f}", border=1)
+            pdf.ln()
 
-    for _, row in df.iterrows():
-        debut = row["date_arrivee"].date()
-        fin = row["date_depart"].date()
-        for jour in jours:
-            if debut <= jour < fin:
-                couleur = couleurs.get(row["plateforme"], "lightgrey")
-                planning[jour].append((row["nom_client"], couleur))
+        # Totaux
+        total_brut = group["prix_brut"].sum()
+        total_net = group["prix_net"].sum()
+        pdf.set_font("Arial", "B", 9)
+        pdf.cell(128, 7, "TOTAL", border=1)
+        pdf.cell(32, 7, f"{total_brut:.2f}", border=1)
+        pdf.cell(32, 7, f"{total_net:.2f}", border=1)
+        pdf.ln(10)
 
-    table = []
-    for semaine in calendar.monthcalendar(annee, mois_index):
-        ligne = []
-        for jour in semaine:
-            if jour == 0:
-                ligne.append("")
-            else:
-                jour_date = date(annee, mois_index, jour)
-                contenu = f"{jour}"
-                for nom, color in planning[jour_date]:
-                    icone = {"lightblue": "🟦", "lightgreen": "🟩", "orange": "🟧"}.get(color, "⬜")
-                    contenu += f"\n{icone} {nom}"
-                ligne.append(contenu)
-        table.append(ligne)
-    st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
+    buffer = BytesIO()
+    pdf.output(buffer)
+    buffer.seek(0)
+    return buffer
 
+# 📊 Rapport mensuel
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
     mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
@@ -140,6 +117,7 @@ def rapport_mensuel(df):
             "%": "mean",
             "nuitees": "sum"
         }).reset_index()
+
         reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).round(2)
         reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).round(2)
         reg["mois"] = reg["mois"].apply(lambda x: calendar.month_name[int(x)])
@@ -151,49 +129,66 @@ def rapport_mensuel(df):
             "nuitees": "{:.0f}"
         }))
 
-        total_annuel = reg.groupby("plateforme")[["prix_brut", "prix_net", "charges", "nuitees"]].sum().reset_index()
-        st.markdown("### Totaux annuels par plateforme")
-        st.dataframe(total_annuel.style.format({
-            "prix_brut": "€{:.0f}", "prix_net": "€{:.0f}",
-            "charges": "€{:.0f}", "nuitees": "{:.0f}"
-        }))
-
-        # Graphiques
+        # 📈 Graphiques
         st.markdown("### 📈 Graphique : Nuitées par mois par plateforme")
         pivot_nuits = data.pivot_table(index="mois", columns="plateforme", values="nuitees", aggfunc="sum").fillna(0)
-        pivot_nuits.index = pivot_nuits.index.map(lambda x: calendar.month_name[x])
         pivot_nuits.plot(kind="bar", stacked=True)
         st.pyplot(plt.gcf())
         plt.clf()
 
         st.markdown("### 📈 Graphique : Total Net par mois par plateforme")
         pivot_net = data.pivot_table(index="mois", columns="plateforme", values="prix_net", aggfunc="sum").fillna(0)
-        pivot_net.index = pivot_net.index.map(lambda x: calendar.month_name[x])
         pivot_net.plot(kind="bar", stacked=True)
         st.pyplot(plt.gcf())
         plt.clf()
 
+        # 📥 Télécharger Excel
         buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            reg.to_excel(writer, sheet_name="Mensuel", index=False)
-            total_annuel.to_excel(writer, sheet_name="Annuel", index=False)
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            reg.to_excel(writer, index=False)
         buffer.seek(0)
-        st.download_button("📥 Télécharger le rapport Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    else:
-        st.info("Aucune donnée disponible pour cette période.")
+        st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+        # 📄 PDF
+        pdf_buffer = generer_pdf(data)
+        st.download_button("📄 Télécharger PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
+
+        # 📧 Envoi email
+        st.markdown("### ✉️ Envoyer le rapport PDF par e-mail")
+        if st.button("Envoyer"):
+            load_dotenv()
+            sender = os.getenv("EMAIL_USER")
+            password = os.getenv("EMAIL_PASS")
+            to_list = os.getenv("DESTINATAIRES", "").split(",")
+
+            msg = EmailMessage()
+            msg["Subject"] = f"📄 Rapport Réservations {annee}"
+            msg["From"] = sender
+            msg["To"] = ", ".join(to_list)
+            msg.set_content("Veuillez trouver ci-joint le rapport PDF des réservations.")
+
+            msg.add_attachment(pdf_buffer.getvalue(), maintype='application', subtype='pdf', filename=f"rapport_{annee}.pdf")
+
+            try:
+                context = ssl.create_default_context()
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+                    server.login(sender, password)
+                    server.send_message(msg)
+                st.success("📧 Email envoyé avec succès.")
+            except Exception as e:
+                st.error(f"Erreur d'envoi : {e}")
+    else:
+        st.info("Aucune donnée pour cette période.")
+
+# 🚀 Lancement
 def main():
     df = charger_donnees()
-    onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport"])
+    onglet = st.sidebar.radio("Navigation", ["📋 Réservations", "➕ Ajouter", "📊 Rapport"])
     if onglet == "📋 Réservations":
         st.title("📋 Tableau des réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
     elif onglet == "➕ Ajouter":
         df = ajouter_reservation(df)
-    elif onglet == "✏️ Modifier / Supprimer":
-        df = modifier_reservation(df)
-    elif onglet == "📅 Calendrier":
-        afficher_calendrier(df)
     elif onglet == "📊 Rapport":
         rapport_mensuel(df)
 
