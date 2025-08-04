@@ -3,4 +3,3 @@ pandas>=1.4.0
 openpyxl
 matplotlib
 fpdf
-fpdf==1.7.2
