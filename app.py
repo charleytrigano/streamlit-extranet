@@ -143,8 +143,7 @@ def main():
     elif onglet == "📨 Historique SMS":
         afficher_historique_sms()
 
-if __name__ == "__main__":
-    main()
+
 
 import requests
 from datetime import datetime
@@ -178,3 +177,6 @@ def envoyer_sms(message, destinataire):
     except FileNotFoundError:
         historique = ligne
     historique.to_csv(HISTORIQUE_SMS, index=False)
+
+if __name__ == "__main__":
+    main()
