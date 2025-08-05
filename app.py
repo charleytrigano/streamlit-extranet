@@ -218,3 +218,59 @@ def liste_clients(df):
         st.download_button("📥 Télécharger Excel (clients)", data=buffer, file_name=f"clients_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     else:
         st.info("Aucune donnée pour cette période.")
+
+import requests
+from datetime import datetime
+
+# Identifiants API Free Mobile
+USER = "12026027"
+API_KEY = "MF7Qjs3C8KxKHz"
+NUM_ADMIN = "+33617722379"
+
+def notifier_arrivees_prochaines(df):
+    today = date.today()
+    demain = today + timedelta(days=1)
+    if df["date_arrivee"].dtype != "datetime64[ns]":
+        df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce")
+    df_notif = df[df["date_arrivee"].dt.date == demain]
+
+    for _, row in df_notif.iterrows():
+        msg = f"{row['plateforme']} - {row['nom_client']} - {row['date_arrivee'].strftime('%d/%m')} - {row['date_depart'].strftime('%d/%m')}"
+        # Envoi à l’administrateur
+        requests.get("https://smsapi.free-mobile.fr/sendmsg", params={
+            "user": USER,
+            "pass": API_KEY,
+            "msg": msg
+        })
+        # Envoi au client s’il a un numéro
+        if pd.notna(row.get("telephone")) and str(row["telephone"]).startswith("06"):
+            tel_client = str(row["telephone"]).replace(" ", "").replace(".", "")
+            # Ici, vous devez adapter avec une vraie API de SMS client si vous en avez une
+            # Exemple fictif : requests.post(..., json={...})
+            print(f"SMS à envoyer à {tel_client} : {msg}")  # Simulé
+
+def main():
+    df = charger_donnees()
+    notifier_arrivees_prochaines(df)  # Envoi SMS automatique
+
+    menu = st.sidebar.radio("Menu", [
+        "📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer",
+        "📅 Calendrier", "📊 Rapport", "👥 Liste clients"
+    ])
+
+    if menu == "📋 Réservations":
+        st.title("📋 Réservations")
+        st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
+    elif menu == "➕ Ajouter":
+        df = ajouter_reservation(df)
+    elif menu == "✏️ Modifier / Supprimer":
+        df = modifier_reservation(df)
+    elif menu == "📅 Calendrier":
+        afficher_calendrier(df)
+    elif menu == "📊 Rapport":
+        rapport_mensuel(df)
+    elif menu == "👥 Liste clients":
+        liste_clients(df)
+
+if __name__ == "__main__":
+    main()
