@@ -117,3 +117,62 @@ def modifier_reservation(df):
             df.to_excel(FICHIER, index=False)
             st.warning("🗑 Réservation supprimée")
     return df
+
+# 🧾 Liste des clients
+def liste_clients(df):
+    st.subheader("📄 Liste des clients")
+    annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
+    mois = st.selectbox("Mois", ["Tous"] + sorted(df["mois"].dropna().unique()))
+    data = df[df["annee"] == annee]
+    if mois != "Tous":
+        data = data[data["mois"] == mois]
+
+    if not data.empty:
+        data_affichee = data[[
+            "nom_client", "date_arrivee", "date_depart", "nuitees", "prix_brut", "prix_net", "charges", "%", "plateforme"
+        ]].copy()
+
+        data_affichee["prix_brut"] = data_affichee["prix_brut"].round(2)
+        data_affichee["prix_net"] = data_affichee["prix_net"].round(2)
+        data_affichee["charges"] = data_affichee["charges"].round(2)
+        data_affichee["%"] = data_affichee["%"].round(2)
+        data_affichee["prix_moyen_brut"] = (data_affichee["prix_brut"] / data_affichee["nuitees"]).replace([np.inf, -np.inf], 0).fillna(0).round(2)
+        data_affichee["prix_moyen_net"] = (data_affichee["prix_net"] / data_affichee["nuitees"]).replace([np.inf, -np.inf], 0).fillna(0).round(2)
+
+        total = pd.DataFrame(data_affichee[[
+            "nuitees", "prix_brut", "prix_net", "charges"
+        ]].sum()).T
+        total["nom_client"] = "TOTAL"
+        total["date_arrivee"] = ""
+        total["date_depart"] = ""
+        total["%"] = (total["charges"] / total["prix_brut"] * 100).round(2)
+        total["plateforme"] = ""
+        total["prix_moyen_brut"] = (total["prix_brut"] / total["nuitees"]).round(2)
+        total["prix_moyen_net"] = (total["prix_net"] / total["nuitees"]).round(2)
+
+        data_affichee = pd.concat([data_affichee, total], ignore_index=True)
+        st.dataframe(data_affichee)
+
+    else:
+        st.info("Aucune donnée pour cette période.")
+
+# ▶️ Lancement
+def main():
+    df = charger_donnees()
+    onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📄 Liste des clients", "📊 Rapport"])
+    if onglet == "📋 Réservations":
+        st.title("📋 Réservations")
+        st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
+    elif onglet == "➕ Ajouter":
+        df = ajouter_reservation(df)
+    elif onglet == "✏️ Modifier / Supprimer":
+        df = modifier_reservation(df)
+    elif onglet == "📅 Calendrier":
+        afficher_calendrier(df)
+    elif onglet == "📄 Liste des clients":
+        liste_clients(df)
+    elif onglet == "📊 Rapport":
+        rapport_mensuel(df)
+
+if __name__ == "__main__":
+    main()
