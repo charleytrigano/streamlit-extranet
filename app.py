@@ -1,49 +1,31 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import datetime, timedelta, date
-import matplotlib.pyplot as plt
+from datetime import date, timedelta, datetime
 from io import BytesIO
+import unicodedata
 import requests
 
 FICHIER = "reservations.xlsx"
-
-# Configuration SMS Free
 USER = "12026027"
 API_KEY = "MF7Qjs3C8KxKHz"
-TELEPHONE_ADMIN = "+33617722379"
+NUM_ADMIN = "+33617722379"
 
-def envoyer_sms_free(message, to=TELEPHONE_ADMIN):
-    url = "https://smsapi.free-mobile.fr/sendmsg"
-    params = {"user": USER, "pass": API_KEY, "msg": message}
-    return requests.get(url, params=params)
-
-def notifier_arrivees_prochaines(df):
-    aujourd_hui = datetime.now().date()
-    demain = aujourd_hui + timedelta(days=1)
-    df_notif = df[df["date_arrivee"] == demain]
-    for _, row in df_notif.iterrows():
-        nom = row["nom_client"]
-        plateforme = row["plateforme"]
-        arrivee = row["date_arrivee"].strftime("%Y-%m-%d")
-        depart = row["date_depart"].strftime("%Y-%m-%d")
-        message = f"{plateforme} - {nom} - {arrivee} - {depart}"
-        response = envoyer_sms_free(message)
-        if response.status_code == 200:
-            st.info(f"📩 SMS envoyé pour {nom}")
-        else:
-            st.warning(f"❌ Erreur SMS pour {nom} ({response.status_code})")
+def nettoyer_texte(s):
+    if isinstance(s, str):
+        return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+    return str(s)
 
 def charger_donnees():
     df = pd.read_excel(FICHIER)
-    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"]).dt.date
-    df["date_depart"] = pd.to_datetime(df["date_depart"]).dt.date
+    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce").dt.date
+    df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce").dt.date
+    df = df[df["date_arrivee"].notna() & df["date_depart"].notna()]
     df["prix_brut"] = pd.to_numeric(df["prix_brut"], errors="coerce").round(2)
     df["prix_net"] = pd.to_numeric(df["prix_net"], errors="coerce").round(2)
     df["charges"] = (df["prix_brut"] - df["prix_net"]).round(2)
-    df["%"] = ((df["charges"] / df["prix_brut"]) * 100).replace([float("inf"), -float("inf")], 0).fillna(0).round(2)
+    df["%"] = ((df["charges"] / df["prix_brut"]) * 100).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
     df["nuitees"] = (pd.to_datetime(df["date_depart"]) - pd.to_datetime(df["date_arrivee"])).dt.days
-    df["nuitees"] = df["nuitees"].fillna(0).astype(int)
     df["annee"] = pd.to_datetime(df["date_arrivee"]).dt.year
     df["mois"] = pd.to_datetime(df["date_arrivee"]).dt.month
     return df
@@ -56,8 +38,8 @@ def ajouter_reservation(df):
         tel = st.text_input("Téléphone")
         arrivee = st.date_input("Date arrivée")
         depart = st.date_input("Date départ", min_value=arrivee + timedelta(days=1))
-        prix_brut = st.number_input("Prix brut", min_value=0.0)
-        prix_net = st.number_input("Prix net", min_value=0.0, max_value=prix_brut)
+        prix_brut = st.number_input("Prix brut", min_value=0.0, format="%.2f")
+        prix_net = st.number_input("Prix net", min_value=0.0, max_value=prix_brut, format="%.2f")
         submit = st.form_submit_button("Enregistrer")
         if submit:
             ligne = {
@@ -69,7 +51,7 @@ def ajouter_reservation(df):
                 "prix_brut": round(prix_brut, 2),
                 "prix_net": round(prix_net, 2),
                 "charges": round(prix_brut - prix_net, 2),
-                "%": round(((prix_brut - prix_net) / prix_brut) * 100 if prix_brut else 0, 2),
+                "%": round((prix_brut - prix_net) / prix_brut * 100, 2) if prix_brut else 0,
                 "nuitees": (depart - arrivee).days,
                 "annee": arrivee.year,
                 "mois": arrivee.month
@@ -90,8 +72,8 @@ def modifier_reservation(df):
         tel = st.text_input("Téléphone", df.at[i, "telephone"])
         arrivee = st.date_input("Arrivée", df.at[i, "date_arrivee"])
         depart = st.date_input("Départ", df.at[i, "date_depart"])
-        brut = st.number_input("Prix brut", value=float(df.at[i, "prix_brut"]))
-        net = st.number_input("Prix net", value=float(df.at[i, "prix_net"]))
+        brut = st.number_input("Prix brut", value=float(df.at[i, "prix_brut"]), format="%.2f")
+        net = st.number_input("Prix net", value=float(df.at[i, "prix_net"]), format="%.2f")
         submit = st.form_submit_button("Modifier")
         delete = st.form_submit_button("Supprimer")
         if submit:
@@ -103,7 +85,7 @@ def modifier_reservation(df):
             df.at[i, "prix_brut"] = round(brut, 2)
             df.at[i, "prix_net"] = round(net, 2)
             df.at[i, "charges"] = round(brut - net, 2)
-            df.at[i, "%"] = round(((brut - net) / brut) * 100 if brut else 0, 2)
+            df.at[i, "%"] = round((brut - net) / brut * 100, 2) if brut else 0
             df.at[i, "nuitees"] = (depart - arrivee).days
             df.at[i, "annee"] = arrivee.year
             df.at[i, "mois"] = arrivee.month
@@ -162,18 +144,6 @@ def rapport_mensuel(df):
         reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
         st.dataframe(reg)
 
-        st.markdown("### 📈 Nuitées par mois")
-        pivot_nuits = data.pivot_table(index="mois", columns="plateforme", values="nuitees", aggfunc="sum").fillna(0)
-        pivot_nuits.plot(kind="bar", stacked=True)
-        st.pyplot(plt.gcf())
-        plt.clf()
-
-        st.markdown("### 📈 Total Net par mois")
-        pivot_net = data.pivot_table(index="mois", columns="plateforme", values="prix_net", aggfunc="sum").fillna(0)
-        pivot_net.plot(kind="bar", stacked=True)
-        st.pyplot(plt.gcf())
-        plt.clf()
-
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             reg.to_excel(writer, index=False)
@@ -183,37 +153,41 @@ def rapport_mensuel(df):
         st.info("Aucune donnée pour cette période.")
 
 def liste_clients(df):
-    st.subheader("📜 Liste des clients")
-    annee = st.selectbox("Année", sorted(df["annee"].unique()))
-    mois = st.selectbox("Mois", ["Tous"] + sorted(df["mois"].unique()))
+    st.subheader("📜 Liste Clients")
+    annee = st.selectbox("Année (liste)", sorted(df["annee"].unique()))
+    mois = st.selectbox("Mois (liste)", ["Tous"] + sorted(df["mois"].unique()))
     data = df[df["annee"] == annee]
     if mois != "Tous":
         data = data[data["mois"] == mois]
     if not data.empty:
-        data["prix_brut_nuit"] = (data["prix_brut"] / data["nuitees"]).replace([float("inf"), -float("inf")], 0).fillna(0).round(2)
-        data["prix_net_nuit"] = (data["prix_net"] / data["nuitees"]).replace([float("inf"), -float("inf")], 0).fillna(0).round(2)
-        colonnes = [
-            "nom_client", "date_arrivee", "date_depart", "nuitees", "prix_brut", "prix_net", "charges", "%",
-            "prix_brut_nuit", "prix_net_nuit"
-        ]
-        total = data[colonnes[3:]].sum(numeric_only=True)
-        total["nom_client"] = "TOTAL"
-        for col in ["date_arrivee", "date_depart"]:
-            total[col] = ""
-        df_affiche = pd.concat([data[colonnes], pd.DataFrame([total])], ignore_index=True)
-        st.dataframe(df_affiche)
+        data["prix_moyen_brut"] = (data["prix_brut"] / data["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+        data["prix_moyen_net"] = (data["prix_net"] / data["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+        total = data[["prix_brut", "prix_net", "charges", "%", "nuitees", "prix_moyen_brut", "prix_moyen_net"]].sum(numeric_only=True).round(2)
+        st.dataframe(data)
+        st.markdown("### 🔢 Totaux")
+        st.dataframe(total.to_frame().T)
 
         buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            df_affiche.to_excel(writer, index=False)
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            data.to_excel(writer, index=False)
         buffer.seek(0)
-        st.download_button("📥 Télécharger la liste", data=buffer, file_name=f"clients_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    else:
-        st.info("Aucune donnée pour cette période.")
+        st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"clients_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+def notifier_arrivees_prochaines(df):
+    demain = date.today() + timedelta(days=1)
+    df_notif = df[pd.to_datetime(df["date_arrivee"]) == pd.to_datetime(demain)]
+    for _, row in df_notif.iterrows():
+        message = f"{row['plateforme']} - {row['nom_client']} - {row['date_arrivee']} - {row['date_depart']}"
+        for numero in [NUM_ADMIN, row["telephone"]]:
+            if pd.notna(numero):
+                params = {"user": USER, "pass": API_KEY, "msg": message, "to": numero}
+                try:
+                    requests.get("https://smsapi.free-mobile.fr/sendmsg", params=params)
+                except Exception as e:
+                    print(f"Erreur envoi SMS à {numero} : {e}")
 
 def main():
     df = charger_donnees()
-    notifier_arrivees_prochaines(df)
     onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport", "📜 Liste Clients"])
     if onglet == "📋 Réservations":
         st.title("📋 Réservations")
@@ -228,6 +202,8 @@ def main():
         rapport_mensuel(df)
     elif onglet == "📜 Liste Clients":
         liste_clients(df)
+
+    notifier_arrivees_prochaines(df)
 
 if __name__ == "__main__":
     main()
