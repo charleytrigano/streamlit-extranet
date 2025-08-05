@@ -1,40 +1,41 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import date, timedelta, datetime
+from datetime import date, datetime, timedelta
 import matplotlib.pyplot as plt
-from fpdf import FPDF
 from io import BytesIO
 import unicodedata
-import os
 import requests
-from pathlib import Path
+import os
 
 FICHIER = "reservations.xlsx"
-SMS_LOG_FILE = "sms_log.csv"
+HISTORIQUE_SMS = "sms_history.csv"
+NUMERO_ADMIN = "+33617722379"
 USER = "12026027"
 API_KEY = "MF7Qjs3C8KxKHz"
-FREE_SMS_ENDPOINT = "https://smsapi.free-mobile.fr/sendmsg"
 
+# Nettoyer accents
 def nettoyer_texte(s):
     if isinstance(s, str):
         return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
     return str(s)
 
+# Charger les données
 def charger_donnees():
     df = pd.read_excel(FICHIER)
-    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"]).dt.date
-    df["date_depart"] = pd.to_datetime(df["date_depart"]).dt.date
+    df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce").dt.date
+    df["date_depart"] = pd.to_datetime(df["date_depart"], errors="coerce").dt.date
     df = df[df["date_arrivee"].notna() & df["date_depart"].notna()]
     df["prix_brut"] = pd.to_numeric(df["prix_brut"], errors="coerce").round(2)
     df["prix_net"] = pd.to_numeric(df["prix_net"], errors="coerce").round(2)
     df["charges"] = (df["prix_brut"] - df["prix_net"]).round(2)
-    df["%"] = ((df["charges"] / df["prix_brut"]) * 100).replace([float('inf'), -float('inf')], 0).fillna(0).round(2)
+    df["%"] = ((df["charges"] / df["prix_brut"]) * 100).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
     df["nuitees"] = (pd.to_datetime(df["date_depart"]) - pd.to_datetime(df["date_arrivee"])).dt.days
     df["annee"] = pd.to_datetime(df["date_arrivee"]).dt.year
     df["mois"] = pd.to_datetime(df["date_arrivee"]).dt.month
     return df
 
+# Ajouter
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -56,7 +57,7 @@ def ajouter_reservation(df):
                 "prix_brut": round(prix_brut, 2),
                 "prix_net": round(prix_net, 2),
                 "charges": round(prix_brut - prix_net, 2),
-                "%": round((prix_brut - prix_net) / prix_brut * 100, 2) if prix_brut else 0,
+                "%": round(((prix_brut - prix_net) / prix_brut) * 100, 2) if prix_brut else 0,
                 "nuitees": (depart - arrivee).days,
                 "annee": arrivee.year,
                 "mois": arrivee.month
@@ -66,6 +67,7 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
+# Modifier / Supprimer
 def modifier_reservation(df):
     st.subheader("✏️ Modifier / Supprimer")
     df["identifiant"] = df["nom_client"] + " | " + pd.to_datetime(df["date_arrivee"]).dt.strftime('%Y-%m-%d')
@@ -90,7 +92,7 @@ def modifier_reservation(df):
             df.at[i, "prix_brut"] = round(brut, 2)
             df.at[i, "prix_net"] = round(net, 2)
             df.at[i, "charges"] = round(brut - net, 2)
-            df.at[i, "%"] = round((brut - net) / brut * 100, 2) if brut else 0
+            df.at[i, "%"] = round(((brut - net) / brut) * 100, 2) if brut else 0
             df.at[i, "nuitees"] = (depart - arrivee).days
             df.at[i, "annee"] = arrivee.year
             df.at[i, "mois"] = arrivee.month
@@ -102,13 +104,11 @@ def modifier_reservation(df):
             st.warning("🗑 Réservation supprimée")
     return df
 
+# Calendrier
 def afficher_calendrier(df):
     st.subheader("📅 Calendrier")
-    col1, col2 = st.columns(2)
-    with col1:
-        annee = st.selectbox("Année", sorted(df["annee"].unique()))
-    with col2:
-        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
+    mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
+    annee = st.selectbox("Année", sorted(df["annee"].unique()))
     mois_index = list(calendar.month_name).index(mois_nom)
     nb_jours = calendar.monthrange(annee, mois_index)[1]
     jours = [date(annee, mois_index, i+1) for i in range(nb_jours)]
@@ -134,6 +134,7 @@ def afficher_calendrier(df):
         table.append(ligne)
     st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
 
+# Rapport
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
     annee = st.selectbox("Année", sorted(df["annee"].unique()))
@@ -147,8 +148,6 @@ def rapport_mensuel(df):
         }).reset_index()
         reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
         reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
-        reg = reg.round(2)
-        reg["nuitees"] = reg["nuitees"].astype(int)
         st.dataframe(reg)
 
         st.markdown("### 📈 Nuitées par mois")
@@ -163,7 +162,6 @@ def rapport_mensuel(df):
         st.pyplot(plt.gcf())
         plt.clf()
 
-        # Excel
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             reg.to_excel(writer, index=False)
@@ -172,75 +170,67 @@ def rapport_mensuel(df):
     else:
         st.info("Aucune donnée pour cette période.")
 
+# Liste clients
 def liste_clients(df):
-    st.subheader("📋 Liste des clients")
+    st.subheader("👥 Liste clients")
     annee = st.selectbox("Année", sorted(df["annee"].unique()))
     mois = st.selectbox("Mois", ["Tous"] + sorted(df["mois"].unique()))
     data = df[df["annee"] == annee]
     if mois != "Tous":
         data = data[data["mois"] == mois]
     if not data.empty:
-        data["prix_brut/nuit"] = (data["prix_brut"] / data["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
-        data["prix_net/nuit"] = (data["prix_net"] / data["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
-        colonnes = ["nom_client", "plateforme", "date_arrivee", "date_depart", "nuitees", "prix_brut", "prix_net", "charges", "%", "prix_brut/nuit", "prix_net/nuit"]
-        st.dataframe(data[colonnes])
+        data["prix_brut/nuit"] = (data["prix_brut"] / data["nuitees"]).round(2)
+        data["prix_net/nuit"] = (data["prix_net"] / data["nuitees"]).round(2)
+        total = data[["prix_brut", "prix_net", "charges", "nuitees"]].sum().to_dict()
+        total["%"] = round((total["charges"] / total["prix_brut"]) * 100, 2) if total["prix_brut"] else 0
+        total_df = pd.DataFrame([total])
+        st.dataframe(data[["nom_client", "plateforme", "date_arrivee", "date_depart", "nuitees", "prix_brut", "prix_net", "charges", "%", "prix_brut/nuit", "prix_net/nuit"]])
+        st.write("**Total :**")
+        st.dataframe(total_df)
 
-        total = data[["prix_brut", "prix_net", "charges", "%", "nuitees"]].sum(numeric_only=True)
-        total["%"] = total["%"] / len(data)
-        total_row = pd.DataFrame([["TOTAL", "", "", "", int(total["nuitees"]), round(total["prix_brut"],2), round(total["prix_net"],2), round(total["charges"],2), round(total["%"],2), "", ""]], columns=colonnes)
-        st.dataframe(total_row)
-        
-        buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            data[colonnes].to_excel(writer, index=False)
-        buffer.seek(0)
-        st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"clients_{annee}_{mois}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+# Envoi SMS
+def envoyer_sms(telephone, message):
+    url = "https://smsapi.free-mobile.fr/sendmsg"
+    params = {"user": USER, "pass": API_KEY, "msg": message}
+    if telephone == NUMERO_ADMIN:
+        requests.get(url, params=params)
     else:
-        st.info("Aucune donnée pour cette période.")
+        # Historique
+        ligne = {"date_envoi": datetime.now(), "telephone": telephone, "message": message}
+        historique = pd.DataFrame([ligne])
+        if os.path.exists(HISTORIQUE_SMS):
+            ancien = pd.read_csv(HISTORIQUE_SMS)
+            historique = pd.concat([ancien, historique], ignore_index=True)
+        historique.to_csv(HISTORIQUE_SMS, index=False)
 
-def envoyer_sms(message):
-    try:
-        params = {"user": USER, "pass": API_KEY, "msg": message}
-        r = requests.get(FREE_SMS_ENDPOINT, params=params)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-def notifier_arrivees_prochaines(df):
-    st.subheader("📨 SMS Client")
-    if st.button("📨 Envoyer SMS clients (arrivée demain)"):
-        demain = date.today() + timedelta(days=1)
-        df_notif = df[df["date_arrivee"] == demain]
-        sent = []
-        for _, row in df_notif.iterrows():
-            msg = (
-                f"VILLA TOBIAS - {row['plateforme']}\n"
-                f"Bonjour {row['nom_client']}. Votre séjour est prévu du {row['date_arrivee']} au {row['date_depart']}. "
-                f"Afin de vous accueillir merci de nous confirmer votre heure d’arrivée. "
-                f"Nous vous rappelons qu'un parking est à votre disposition sur place. A demain."
-            )
-            if envoyer_sms(msg):
-                sent.append({"nom": row["nom_client"], "plateforme": row["plateforme"], "date": str(date.today()), "msg": msg})
-        if sent:
-            Path(SMS_LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
-            old = pd.read_csv(SMS_LOG_FILE) if os.path.exists(SMS_LOG_FILE) else pd.DataFrame()
-            new = pd.DataFrame(sent)
-            pd.concat([old, new], ignore_index=True).to_csv(SMS_LOG_FILE, index=False)
-            st.success(f"✅ {len(sent)} SMS envoyés")
-        else:
-            st.info("Aucun SMS à envoyer.")
-
+# Historique SMS
 def historique_sms():
-    st.subheader("📨 Historique SMS envoyés")
-    if os.path.exists(SMS_LOG_FILE):
-        df_sms = pd.read_csv(SMS_LOG_FILE)
-        st.dataframe(df_sms)
+    st.subheader("✉️ Historique SMS")
+    if os.path.exists(HISTORIQUE_SMS):
+        hist = pd.read_csv(HISTORIQUE_SMS)
+        st.dataframe(hist)
     else:
-        st.info("Aucun SMS enregistré.")
+        st.info("Aucun SMS encore enregistré.")
 
+# Automatique ou bouton
+def bouton_sms(df):
+    st.subheader("✉️ SMS à envoyer")
+    demain = (datetime.now() + timedelta(days=1)).date()
+    futurs = df[df["date_arrivee"] == demain]
+    if not futurs.empty:
+        for _, row in futurs.iterrows():
+            message = f"VILLA TOBIAS - {row['plateforme']}\nBonjour {row['nom_client']}. Votre séjour est prévu du {row['date_arrivee']} au {row['date_depart']}. Afin de vous accueillir merci de nous confirmer votre heure d’arrivée. Un parking est à votre disposition. À demain."
+            if st.button(f"Envoyer SMS à {row['nom_client']}"):
+                envoyer_sms(row["telephone"], message)
+                envoyer_sms(NUMERO_ADMIN, message)
+                st.success("✅ SMS envoyé")
+    else:
+        st.info("Aucun SMS à envoyer aujourd’hui.")
+
+# Main
 def main():
     df = charger_donnees()
-    onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport", "📋 Liste clients", "📨 SMS", "📨 Historique SMS"])
+    onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport", "👥 Liste clients", "✉️ Historique SMS"])
     if onglet == "📋 Réservations":
         st.title("📋 Réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
@@ -252,12 +242,11 @@ def main():
         afficher_calendrier(df)
     elif onglet == "📊 Rapport":
         rapport_mensuel(df)
-    elif onglet == "📋 Liste clients":
+    elif onglet == "👥 Liste clients":
         liste_clients(df)
-    elif onglet == "📨 SMS":
-        notifier_arrivees_prochaines(df)
-    elif onglet == "📨 Historique SMS":
+    elif onglet == "✉️ Historique SMS":
         historique_sms()
+        bouton_sms(df)
 
 if __name__ == "__main__":
     main()
