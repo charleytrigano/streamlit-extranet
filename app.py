@@ -9,13 +9,11 @@ import unicodedata
 
 FICHIER = "reservations.xlsx"
 
-# 🔤 Nettoyer accents & caractères spéciaux
 def nettoyer_texte(s):
     if isinstance(s, str):
         return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
     return str(s)
 
-# 🧾 Multi-ligne PDF sécurisé
 def ecrire_pdf_multiligne_safe(pdf, texte, largeur_max=270):
     mots = texte.split()
     ligne = ""
@@ -34,7 +32,6 @@ def ecrire_pdf_multiligne_safe(pdf, texte, largeur_max=270):
         except:
             pdf.multi_cell(0, 8, "<ligne non imprimable>")
 
-# 📥 Charger données
 def charger_donnees():
     df = pd.read_excel(FICHIER)
     df["date_arrivee"] = pd.to_datetime(df["date_arrivee"], errors="coerce").dt.date
@@ -43,13 +40,12 @@ def charger_donnees():
     df["prix_brut"] = pd.to_numeric(df["prix_brut"], errors="coerce").round(2)
     df["prix_net"] = pd.to_numeric(df["prix_net"], errors="coerce").round(2)
     df["charges"] = (df["prix_brut"] - df["prix_net"]).round(2)
-    df["%"] = ((df["charges"] / df["prix_brut"]) * 100).round(2)
-    df["nuitees"] = (pd.to_datetime(df["date_depart"]) - pd.to_datetime(df["date_arrivee"])).dt.days
+    df["%"] = ((df["charges"] / df["prix_brut"]) * 100).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+    df["nuitees"] = (pd.to_datetime(df["date_depart"]) - pd.to_datetime(df["date_arrivee"])).dt.days.astype(int)
     df["annee"] = pd.to_datetime(df["date_arrivee"]).dt.year
     df["mois"] = pd.to_datetime(df["date_arrivee"]).dt.month
     return df
 
-# ➕ Ajouter réservation
 def ajouter_reservation(df):
     st.subheader("➕ Nouvelle Réservation")
     with st.form("ajout"):
@@ -58,8 +54,8 @@ def ajouter_reservation(df):
         tel = st.text_input("Téléphone")
         arrivee = st.date_input("Date arrivée")
         depart = st.date_input("Date départ", min_value=arrivee + timedelta(days=1))
-        prix_brut = st.number_input("Prix brut", min_value=0.0, step=0.01, format="%.2f")
-        prix_net = st.number_input("Prix net", min_value=0.0, max_value=prix_brut, step=0.01, format="%.2f")
+        prix_brut = st.number_input("Prix brut", min_value=0.0, format="%.2f")
+        prix_net = st.number_input("Prix net", min_value=0.0, max_value=prix_brut, format="%.2f")
         submit = st.form_submit_button("Enregistrer")
         if submit:
             ligne = {
@@ -81,7 +77,6 @@ def ajouter_reservation(df):
             st.success("✅ Réservation enregistrée")
     return df
 
-# ✏️ Modifier / Supprimer
 def modifier_reservation(df):
     st.subheader("✏️ Modifier / Supprimer")
     df["identifiant"] = df["nom_client"] + " | " + pd.to_datetime(df["date_arrivee"]).dt.strftime('%Y-%m-%d')
@@ -93,8 +88,8 @@ def modifier_reservation(df):
         tel = st.text_input("Téléphone", df.at[i, "telephone"])
         arrivee = st.date_input("Arrivée", df.at[i, "date_arrivee"])
         depart = st.date_input("Départ", df.at[i, "date_depart"])
-        brut = st.number_input("Prix brut", value=float(df.at[i, "prix_brut"]), step=0.01, format="%.2f")
-        net = st.number_input("Prix net", value=float(df.at[i, "prix_net"]), step=0.01, format="%.2f")
+        brut = st.number_input("Prix brut", value=float(df.at[i, "prix_brut"]), format="%.2f")
+        net = st.number_input("Prix net", value=float(df.at[i, "prix_net"]), format="%.2f")
         submit = st.form_submit_button("Modifier")
         delete = st.form_submit_button("Supprimer")
         if submit:
@@ -118,7 +113,95 @@ def modifier_reservation(df):
             st.warning("🗑 Réservation supprimée")
     return df
 
-# 🧾 Liste des clients
+def afficher_calendrier(df):
+    st.subheader("📅 Calendrier")
+    col1, col2 = st.columns(2)
+    with col1:
+        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
+    with col2:
+        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
+    mois_index = list(calendar.month_name).index(mois_nom)
+    nb_jours = calendar.monthrange(annee, mois_index)[1]
+    jours = [date(annee, mois_index, i+1) for i in range(nb_jours)]
+    planning = {jour: [] for jour in jours}
+    couleurs = {"Booking": "🟦", "Airbnb": "🟩", "Autre": "🟧"}
+    for _, row in df.iterrows():
+        debut = row["date_arrivee"]
+        fin = row["date_depart"]
+        for jour in jours:
+            if debut <= jour < fin:
+                icone = couleurs.get(row["plateforme"], "⬜")
+                planning[jour].append(f"{icone} {row['nom_client']}")
+    table = []
+    for semaine in calendar.monthcalendar(annee, mois_index):
+        ligne = []
+        for jour in semaine:
+            if jour == 0:
+                ligne.append("")
+            else:
+                jour_date = date(annee, mois_index, jour)
+                contenu = f"{jour}\n" + "\n".join(planning[jour_date])
+                ligne.append(contenu)
+        table.append(ligne)
+    st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
+
+def exporter_pdf(data, annee):
+    pdf = FPDF(orientation="L", format="A4")
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=10)
+    pdf.cell(0, 10, txt=f"Rapport Reservations - {annee}", ln=True, align="C")
+    pdf.ln(5)
+    for _, row in data.iterrows():
+        texte = (
+            f"{row['annee']} {row['mois']} | Plateforme: {row['plateforme']} | Nuitées: {int(row['nuitees'])} | "
+            f"Brut: {row['prix_brut']:.2f}€ | Net: {row['prix_net']:.2f}€ | Charges: {row['charges']:.2f}€ | "
+            f"Moy. brut/nuit: {row['prix_moyen_brut']:.2f}€ | Moy. net/nuit: {row['prix_moyen_net']:.2f}€"
+        )
+        ecrire_pdf_multiligne_safe(pdf, nettoyer_texte(texte))
+    buffer = BytesIO()
+    pdf.output(buffer)
+    buffer.seek(0)
+    return buffer
+
+def rapport_mensuel(df):
+    st.subheader("📊 Rapport mensuel")
+    annee = st.selectbox("Année", sorted(df["annee"].unique()))
+    mois = st.selectbox("Mois", ["Tous"] + sorted(df["mois"].unique()))
+    data = df[df["annee"] == annee]
+    if mois != "Tous":
+        data = data[data["mois"] == mois]
+    if not data.empty:
+        reg = data.groupby(["annee", "mois", "plateforme"]).agg({
+            "prix_brut": "sum", "prix_net": "sum", "charges": "sum", "%": "mean", "nuitees": "sum"
+        }).reset_index()
+        reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+        reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+        reg = reg.round(2)
+        st.dataframe(reg)
+
+        st.markdown("### 📈 Nuitées par mois")
+        pivot_nuits = data.pivot_table(index="mois", columns="plateforme", values="nuitees", aggfunc="sum").fillna(0)
+        pivot_nuits.plot(kind="bar", stacked=True)
+        st.pyplot(plt.gcf())
+        plt.clf()
+
+        st.markdown("### 📈 Total Net par mois")
+        pivot_net = data.pivot_table(index="mois", columns="plateforme", values="prix_net", aggfunc="sum").fillna(0)
+        pivot_net.plot(kind="bar", stacked=True)
+        st.pyplot(plt.gcf())
+        plt.clf()
+
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            reg.to_excel(writer, index=False)
+        buffer.seek(0)
+        st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        pdf_buffer = exporter_pdf(reg, annee)
+        st.download_button("📄 Télécharger PDF", data=pdf_buffer, file_name=f"rapport_{annee}.pdf", mime="application/pdf")
+    else:
+        st.info("Aucune donnée pour cette période.")
+
 def liste_clients(df):
     st.subheader("📄 Liste des clients")
     annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
@@ -126,40 +209,35 @@ def liste_clients(df):
     data = df[df["annee"] == annee]
     if mois != "Tous":
         data = data[data["mois"] == mois]
-
     if not data.empty:
-        data_affichee = data[[
-            "nom_client", "date_arrivee", "date_depart", "nuitees", "prix_brut", "prix_net", "charges", "%", "plateforme"
+        data["prix_moyen_brut"] = (data["prix_brut"] / data["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+        data["prix_moyen_net"] = (data["prix_net"] / data["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+        tableau = data[[
+            "nom_client", "date_arrivee", "date_depart", "nuitees", "prix_brut", "prix_net",
+            "charges", "%", "prix_moyen_brut", "prix_moyen_net", "plateforme"
         ]].copy()
-
-        data_affichee["prix_brut"] = data_affichee["prix_brut"].round(2)
-        data_affichee["prix_net"] = data_affichee["prix_net"].round(2)
-        data_affichee["charges"] = data_affichee["charges"].round(2)
-        data_affichee["%"] = data_affichee["%"].round(2)
-        data_affichee["prix_moyen_brut"] = (data_affichee["prix_brut"] / data_affichee["nuitees"]).replace([np.inf, -np.inf], 0).fillna(0).round(2)
-        data_affichee["prix_moyen_net"] = (data_affichee["prix_net"] / data_affichee["nuitees"]).replace([np.inf, -np.inf], 0).fillna(0).round(2)
-
-        total = pd.DataFrame(data_affichee[[
-            "nuitees", "prix_brut", "prix_net", "charges"
-        ]].sum()).T
-        total["nom_client"] = "TOTAL"
-        total["date_arrivee"] = ""
-        total["date_depart"] = ""
-        total["%"] = (total["charges"] / total["prix_brut"] * 100).round(2)
-        total["plateforme"] = ""
-        total["prix_moyen_brut"] = (total["prix_brut"] / total["nuitees"]).round(2)
-        total["prix_moyen_net"] = (total["prix_net"] / total["nuitees"]).round(2)
-
-        data_affichee = pd.concat([data_affichee, total], ignore_index=True)
-        st.dataframe(data_affichee)
-
+        tableau = tableau.round(2)
+        total = pd.DataFrame([{
+            "nom_client": "TOTAL",
+            "date_arrivee": "",
+            "date_depart": "",
+            "nuitees": int(tableau["nuitees"].sum()),
+            "prix_brut": tableau["prix_brut"].sum().round(2),
+            "prix_net": tableau["prix_net"].sum().round(2),
+            "charges": tableau["charges"].sum().round(2),
+            "%": round((tableau["charges"].sum() / tableau["prix_brut"].sum()) * 100, 2) if tableau["prix_brut"].sum() else 0,
+            "prix_moyen_brut": round(tableau["prix_brut"].sum() / tableau["nuitees"].sum(), 2) if tableau["nuitees"].sum() else 0,
+            "prix_moyen_net": round(tableau["prix_net"].sum() / tableau["nuitees"].sum(), 2) if tableau["nuitees"].sum() else 0,
+            "plateforme": ""
+        }])
+        tableau = pd.concat([tableau, total], ignore_index=True)
+        st.dataframe(tableau)
     else:
-        st.info("Aucune donnée pour cette période.")
+        st.info("Aucune donnée disponible.")
 
-# ▶️ Lancement
 def main():
     df = charger_donnees()
-    onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📄 Liste des clients", "📊 Rapport"])
+    onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport", "📄 Liste des clients"])
     if onglet == "📋 Réservations":
         st.title("📋 Réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
@@ -169,10 +247,10 @@ def main():
         df = modifier_reservation(df)
     elif onglet == "📅 Calendrier":
         afficher_calendrier(df)
-    elif onglet == "📄 Liste des clients":
-        liste_clients(df)
     elif onglet == "📊 Rapport":
         rapport_mensuel(df)
+    elif onglet == "📄 Liste des clients":
+        liste_clients(df)
 
 if __name__ == "__main__":
     main()
