@@ -15,26 +15,24 @@ def nettoyer_texte(s):
     return str(s)
 
 def ecrire_pdf_multiligne(pdf, texte, largeur_max=160):
-    try:
-        texte = nettoyer_texte(str(texte)).replace('\n', ' ').replace('\r', ' ')
-        mots = texte.split(" ")
-        ligne = ""
-        for mot in mots:
-            if len(ligne + " " + mot) < largeur_max:
-                ligne += " " + mot
-            else:
-                try:
-                    pdf.multi_cell(0, 8, ligne.strip())
-                except:
-                    pdf.multi_cell(0, 8, "<ligne non imprimable>")
-                ligne = mot
-        if ligne:
+    mots = texte.split()
+    ligne = ""
+    for mot in mots:
+        if len(mot) > largeur_max:
+            mot = "<valeur trop longue>"
+        if len(ligne + " " + mot) > largeur_max:
             try:
-                pdf.multi_cell(0, 8, ligne.strip())
+                pdf.multi_cell(0, 8, ligne)
             except:
                 pdf.multi_cell(0, 8, "<ligne non imprimable>")
-    except:
-        pdf.multi_cell(0, 8, "<texte non imprimable>")
+            ligne = mot
+        else:
+            ligne += " " + mot
+    if ligne.strip():
+        try:
+            pdf.multi_cell(0, 8, ligne)
+        except:
+            pdf.multi_cell(0, 8, "<ligne non imprimable>")
 
 def charger_donnees():
     df = pd.read_excel(FICHIER)
@@ -68,9 +66,9 @@ def ajouter_reservation(df):
                 "telephone": tel,
                 "date_arrivee": arrivee,
                 "date_depart": depart,
-                "prix_brut": prix_brut,
-                "prix_net": prix_net,
-                "charges": prix_brut - prix_net,
+                "prix_brut": round(prix_brut, 2),
+                "prix_net": round(prix_net, 2),
+                "charges": round(prix_brut - prix_net, 2),
                 "%": round((prix_brut - prix_net) / prix_brut * 100, 2) if prix_brut else 0,
                 "nuitees": (depart - arrivee).days,
                 "annee": arrivee.year,
@@ -102,9 +100,9 @@ def modifier_reservation(df):
             df.at[i, "telephone"] = tel
             df.at[i, "date_arrivee"] = arrivee
             df.at[i, "date_depart"] = depart
-            df.at[i, "prix_brut"] = brut
-            df.at[i, "prix_net"] = net
-            df.at[i, "charges"] = brut - net
+            df.at[i, "prix_brut"] = round(brut, 2)
+            df.at[i, "prix_net"] = round(net, 2)
+            df.at[i, "charges"] = round(brut - net, 2)
             df.at[i, "%"] = round((brut - net) / brut * 100, 2) if brut else 0
             df.at[i, "nuitees"] = (depart - arrivee).days
             df.at[i, "annee"] = arrivee.year
@@ -156,13 +154,17 @@ def exporter_pdf(data, annee):
     pdf.cell(0, 10, txt=f"Rapport Réservations - {annee}", ln=True, align="C")
     pdf.ln(5)
     for _, row in data.iterrows():
-        row = row.fillna("")
+        row["prix_brut"] = round(row["prix_brut"], 2)
+        row["prix_net"] = round(row["prix_net"], 2)
+        row["charges"] = round(row["charges"], 2)
+        row["prix_moyen_brut"] = round(row["prix_moyen_brut"], 2)
+        row["prix_moyen_net"] = round(row["prix_moyen_net"], 2)
         texte = (
-            f"{row['annee']} {calendar.month_name[int(row['mois'])]} | Plateforme: {row['plateforme']} | Nuitées: {row['nuitees']} | "
-            f"Brut: {row['prix_brut']:.2f}€ | Net: {row['prix_net']:.2f}€ | Charges: {row['charges']:.2f}€ | "
-            f"Moy. brut/nuit: {row['prix_moyen_brut']:.2f}€ | Moy. net/nuit: {row['prix_moyen_net']:.2f}€"
+            f"{row['annee']} {row['mois']} | Plateforme: {row['plateforme']} | Nuitées: {row['nuitees']} | "
+            f"Brut: {row['prix_brut']}€ | Net: {row['prix_net']}€ | Charges: {row['charges']}€ | "
+            f"Moy. brut/nuit: {row['prix_moyen_brut']}€ | Moy. net/nuit: {row['prix_moyen_net']}€"
         )
-        ecrire_pdf_multiligne(pdf, texte)
+        ecrire_pdf_multiligne(pdf, nettoyer_texte(texte), largeur_max=160)
     buffer = BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
@@ -171,7 +173,7 @@ def exporter_pdf(data, annee):
 def rapport_mensuel(df):
     st.subheader("📊 Rapport mensuel")
     annee = st.selectbox("Année", sorted(df["annee"].unique()))
-    mois = st.selectbox("Mois", ["Tous"] + sorted(df["mois"].unique()))
+    mois = st.selectbox("Filtre mois", ["Tous"] + sorted(df["mois"].unique()))
     data = df[df["annee"] == annee]
     if mois != "Tous":
         data = data[data["mois"] == mois]
@@ -181,6 +183,7 @@ def rapport_mensuel(df):
         }).reset_index()
         reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).round(2)
         reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).round(2)
+        reg = reg.round(2)
         st.dataframe(reg)
 
         st.markdown("### 📈 Nuitées par mois")
@@ -209,31 +212,28 @@ def rapport_mensuel(df):
         st.info("Aucune donnée pour cette période.")
 
 def liste_clients(df):
-    st.subheader("📋 Liste des clients")
+    st.subheader("📒 Liste des clients")
     annee = st.selectbox("Année", sorted(df["annee"].unique()))
     mois = st.selectbox("Mois", ["Tous"] + sorted(df["mois"].unique()))
     data = df[df["annee"] == annee]
     if mois != "Tous":
         data = data[data["mois"] == mois]
-
     if not data.empty:
         data["prix_brut/nuit"] = (data["prix_brut"] / data["nuitees"]).round(2)
         data["prix_net/nuit"] = (data["prix_net"] / data["nuitees"]).round(2)
         colonnes = ["nom_client", "date_arrivee", "date_depart", "nuitees", "prix_brut", "prix_net", "charges", "%", "prix_brut/nuit", "prix_net/nuit"]
-        st.dataframe(data[colonnes])
-
-        total = data[colonnes[3:]].sum(numeric_only=True)
-        st.write("**Totaux**")
-        st.write(total.to_frame().T)
+        data[colonnes] = data[colonnes].round(2)
+        total = data[colonnes].select_dtypes(include='number').sum().to_frame().T
+        total.insert(0, "nom_client", "TOTAL")
+        total["date_arrivee"] = ""
+        total["date_depart"] = ""
+        st.dataframe(pd.concat([data[colonnes], total], ignore_index=True))
     else:
-        st.info("Aucune donnée pour cette période.")
+        st.info("Aucune donnée.")
 
 def main():
     df = charger_donnees()
-    onglet = st.sidebar.radio("Menu", [
-        "📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer",
-        "📅 Calendrier", "📊 Rapport", "📋 Liste clients"
-    ])
+    onglet = st.sidebar.radio("Menu", ["📋 Réservations", "➕ Ajouter", "✏️ Modifier / Supprimer", "📅 Calendrier", "📊 Rapport", "📒 Liste clients"])
     if onglet == "📋 Réservations":
         st.title("📋 Réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
@@ -245,7 +245,7 @@ def main():
         afficher_calendrier(df)
     elif onglet == "📊 Rapport":
         rapport_mensuel(df)
-    elif onglet == "📋 Liste clients":
+    elif onglet == "📒 Liste clients":
         liste_clients(df)
 
 if __name__ == "__main__":
