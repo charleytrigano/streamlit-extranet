@@ -114,3 +114,107 @@ def modifier_reservation(df):
             df.to_excel(FICHIER, index=False)
             st.warning("🗑 Réservation supprimée")
     return df
+
+def afficher_calendrier(df):
+    st.subheader("📅 Calendrier")
+    col1, col2 = st.columns(2)
+    with col1:
+        annee = st.selectbox("Année", sorted(df["annee"].dropna().unique()))
+    with col2:
+        mois_nom = st.selectbox("Mois", list(calendar.month_name)[1:])
+    mois_index = list(calendar.month_name).index(mois_nom)
+    nb_jours = calendar.monthrange(annee, mois_index)[1]
+    jours = [date(annee, mois_index, i + 1) for i in range(nb_jours)]
+    planning = {jour: [] for jour in jours}
+    couleurs = {"Booking": "🟦", "Airbnb": "🟩", "Autre": "🟧"}
+    for _, row in df.iterrows():
+        debut = row["date_arrivee"]
+        fin = row["date_depart"]
+        for jour in jours:
+            if debut <= jour < fin:
+                icone = couleurs.get(row["plateforme"], "⬜")
+                planning[jour].append(f"{icone} {row['nom_client']}")
+    table = []
+    for semaine in calendar.monthcalendar(annee, mois_index):
+        ligne = []
+        for jour in semaine:
+            if jour == 0:
+                ligne.append("")
+            else:
+                jour_date = date(annee, mois_index, jour)
+                contenu = f"{jour}\n" + "\n".join(planning[jour_date])
+                ligne.append(contenu)
+        table.append(ligne)
+    st.table(pd.DataFrame(table, columns=["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]))
+
+def rapport_mensuel(df):
+    st.subheader("📊 Rapport mensuel")
+    annee = st.selectbox("Année", sorted(df["annee"].unique()))
+    mois = st.selectbox("Mois", ["Tous"] + sorted(df["mois"].unique()))
+    data = df[df["annee"] == annee]
+    if mois != "Tous":
+        data = data[data["mois"] == mois]
+    if not data.empty:
+        reg = data.groupby(["annee", "mois", "plateforme"]).agg({
+            "prix_brut": "sum",
+            "prix_net": "sum",
+            "charges": "sum",
+            "%": "mean",
+            "nuitees": "sum"
+        }).reset_index()
+        reg["prix_moyen_brut"] = (reg["prix_brut"] / reg["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+        reg["prix_moyen_net"] = (reg["prix_net"] / reg["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+        reg = reg.round({"prix_brut": 2, "prix_net": 2, "charges": 2, "%": 2, "nuitees": 0})
+
+        st.dataframe(reg)
+
+        st.markdown("### 📈 Nuitées par mois")
+        pivot_nuits = data.pivot_table(index="mois", columns="plateforme", values="nuitees", aggfunc="sum").fillna(0)
+        pivot_nuits.plot(kind="bar", stacked=True)
+        st.pyplot(plt.gcf())
+        plt.clf()
+
+        st.markdown("### 📈 Total Net par mois")
+        pivot_net = data.pivot_table(index="mois", columns="plateforme", values="prix_net", aggfunc="sum").fillna(0)
+        pivot_net.plot(kind="bar", stacked=True)
+        st.pyplot(plt.gcf())
+        plt.clf()
+
+        # Export Excel
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            reg.to_excel(writer, index=False)
+        buffer.seek(0)
+        st.download_button("📥 Télécharger Excel", data=buffer, file_name=f"rapport_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    else:
+        st.info("Aucune donnée pour cette période.")
+
+def liste_clients(df):
+    st.subheader("👥 Liste des clients")
+    annee = st.selectbox("Année (liste clients)", sorted(df["annee"].unique()))
+    mois = st.selectbox("Mois (liste clients)", ["Tous"] + sorted(df["mois"].unique()))
+    data = df[df["annee"] == annee]
+    if mois != "Tous":
+        data = data[data["mois"] == mois]
+
+    if not data.empty:
+        colonnes = [
+            "nom_client", "plateforme", "date_arrivee", "date_depart",
+            "nuitees", "prix_brut", "prix_net", "charges", "%"]
+        data["prix_brut/nuit"] = (data["prix_brut"] / data["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+        data["prix_net/nuit"] = (data["prix_net"] / data["nuitees"]).replace([float("inf"), float("-inf")], 0).fillna(0).round(2)
+
+        data = data[colonnes + ["prix_brut/nuit", "prix_net/nuit"]]
+        total = pd.DataFrame(data.select_dtypes(include='number').sum()).T
+        total[["nom_client", "plateforme", "date_arrivee", "date_depart"]] = "Total"
+        data = pd.concat([data, total], ignore_index=True)
+
+        st.dataframe(data)
+
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            data.to_excel(writer, index=False)
+        buffer.seek(0)
+        st.download_button("📥 Télécharger Excel (clients)", data=buffer, file_name=f"clients_{annee}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    else:
+        st.info("Aucune donnée pour cette période.")
