@@ -219,7 +219,7 @@ def bouton_sms(df):
     futurs = df[df["date_arrivee"] == demain]
     if not futurs.empty:
         for _, row in futurs.iterrows():
-            message = f"VILLA TOBIAS - {row['plateforme']}\nBonjour {row['nom_client']}. Votre séjour est prévu du {row['date_arrivee']} au {row['date_depart']}. Afin de vous accueillir merci de nous confirmer votre heure d’arrivée. Un parking est à votre disposition. À demain."
+            message = f"VILLA TOBIAS - {row['plateforme']}\nBonjour {row['nom_client']}. Votre séjour est prévu du {row['date_arrivee']} au {row['date_depart']}. Afin de vous accueillir merci de nous confirmer votre heure d’arrivée. Un parking est à votre disposition. A demain."
             if st.button(f"Envoyer SMS à {row['nom_client']}"):
                 envoyer_sms(row["telephone"], message)
                 envoyer_sms(NUMERO_ADMIN, message)
