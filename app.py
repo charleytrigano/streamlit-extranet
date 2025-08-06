@@ -234,6 +234,8 @@ def main():
     if onglet == "📋 Réservations":
         st.title("📋 Réservations")
         st.dataframe(df.drop(columns=["identifiant"], errors="ignore"))
+    telecharger_fichier_excel(df)
+
     elif onglet == "➕ Ajouter":
         df = ajouter_reservation(df)
     elif onglet == "✏️ Modifier / Supprimer":
