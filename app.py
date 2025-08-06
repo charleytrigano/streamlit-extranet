@@ -1,11 +1,4 @@
-app/
-├── app.py                ← Point d’entrée principal
-├── data_loader.py        ← Chargement, import, export des données
-├── views.py              ← Les onglets de l’app (réservations, ajout, etc.)
-├── sms.py                ← Notifications SMS + historique
-├── utils.py              ← Fonctions utilitaires (ex : nettoyer_texte)
-├── reservations.xlsx     ← Ton fichier de données
-└── historique_sms.csv    ← Historique des SMS
+
 
 import streamlit as st
 from data_loader import charger_donnees, telecharger_fichier_excel, uploader_excel
