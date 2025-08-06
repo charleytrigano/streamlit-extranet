@@ -250,3 +250,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+import base64
+
+def telecharger_fichier_excel(df):
+    """Créer un lien de téléchargement Excel depuis le dataframe"""
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
+    b64 = base64.b64encode(buffer.read()).decode()
+    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="reservations.xlsx">📥 Télécharger reservations.xlsx</a>'
+    st.markdown(href, unsafe_allow_html=True)
