@@ -1,5 +1,4 @@
 
-
 import streamlit as st
 from data_loader import charger_donnees, telecharger_fichier_excel, uploader_excel
 from views import afficher_reservations, ajouter_reservation, modifier_reservation, afficher_calendrier, afficher_rapport, liste_clients
